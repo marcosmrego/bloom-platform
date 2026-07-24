@@ -1,0 +1,14 @@
+{
+  "name": "bloom-frontend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "start": "node dist/server/entry.mjs"
+  },
+  "dependencies": {
+    "astro": "^5.0.0",
+    "@astrojs/node": "^9.0.0"
+  }
+}

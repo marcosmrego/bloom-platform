@@ -1,0 +1,68 @@
+---
+import { getPosts } from '../../lib/api';
+
+const TENANT = 'viralbarato';
+const { slug } = Astro.params;
+const posts = await getPosts(TENANT, slug!);
+const categoryName = posts[0]?.category_name || slug;
+
+// Mapeia slug para nome
+const catNames: Record<string, string> = {
+  eletronicos: 'Eletrônicos',
+  'casa-cozinha': 'Casa & Cozinha',
+  beleza: 'Beleza',
+  esportes: 'Esportes',
+  pets: 'Pets',
+};
+const displayName = catNames[slug!] || slug;
+---
+
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{displayName} — ViralBarato</title>
+  <meta name="description" content="Reviews de {displayName.toLowerCase()} com os melhores preços." />
+  <style>
+    :root { --accent: #e63946; --bg: #f8f9fa; --card: #fff; --text: #212529; --muted: #6c757d; --border: #dee2e6; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+    .container { max-width: 1000px; margin: 0 auto; padding: 0 1rem; }
+    header { background: var(--accent); color: #fff; padding: 1.2rem 0; margin-bottom: 2rem; }
+    header a { color: #fff; text-decoration: none; }
+    .posts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 3rem; }
+    .card { background: var(--card); border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); transition: transform 0.2s; }
+    .card:hover { transform: translateY(-3px); }
+    .card img { width: 100%; height: 180px; object-fit: cover; background: #e9ecef; }
+    .card-body { padding: 1rem; }
+    .card-cat { display: inline-block; background: #f1f3f5; color: var(--muted); padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; margin-bottom: 0.5rem; }
+    .card-title { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.25rem; }
+    .card-title a { color: var(--text); text-decoration: none; }
+    .card-meta { display: flex; justify-content: space-between; margin-top: 0.5rem; }
+    .card-price { font-weight: 700; color: #2d6a4f; }
+    .card-rating { color: #f4a261; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <header><div class="container"><a href="/">← ViralBarato</a> / <strong>{displayName}</strong></div></header>
+  <main class="container">
+    <h2 style="margin-bottom:1.5rem">{displayName} ({posts.length} reviews)</h2>
+    <div class="posts-grid">
+      {posts.map(post => (
+        <article class="card">
+          <img src={post.image_url || 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=400'} alt={post.title} loading="lazy" />
+          <div class="card-body">
+            <span class="card-cat">{post.category_name}</span>
+            <h2 class="card-title"><a href={`/blog/${post.slug}`}>{post.title}</a></h2>
+            <div class="card-meta">
+              {post.product_price && <span class="card-price">R$ {post.product_price.toFixed(2)}</span>}
+              {post.rating && <span class="card-rating">{'⭐'.repeat(Math.floor(post.rating))} {post.rating}</span>}
+            </div>
+          </div>
+        </article>
+      ))}
+    </div>
+  </main>
+</body>
+</html>
