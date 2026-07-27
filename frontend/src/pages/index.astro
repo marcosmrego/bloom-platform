@@ -104,7 +104,6 @@ const config = {
               <a href={`/blog/${post.slug}`}>{post.title}</a>
             </h2>
             <div class="card-meta">
-              {post.price && <span class="card-price">R$ {Number(post.price).toFixed(2).replace('.', ',')}</span>}
               {post.rating && <span class="card-rating">{'★'.repeat(Math.floor(post.rating))} {post.rating}</span>}
             </div>
             <div class="card-date">{new Date(post.published_at).toLocaleDateString('pt-BR')}</div>

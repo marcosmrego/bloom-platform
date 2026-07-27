@@ -89,7 +89,6 @@ const tenantConfig = {
 
       <div class="meta">
         {post.rating && <span class="rating">{stars} <strong>{post.rating}/5</strong></span>}
-        {price && <span class="price-tag">R$ {Number(price).toFixed(2).replace('.', ',')}</span>}
         <span class="cat-badge">{new Date(post.published_at).toLocaleDateString('pt-BR')}</span>
       </div>
 
@@ -121,7 +120,7 @@ const tenantConfig = {
       {post.affiliate_url && (
         <div class="buy-section">
           <a href={post.affiliate_url} class="buy-btn" target="_blank" rel="nofollow sponsored">
-            🛒 Ver Preço na Amazon{price && <> — R$ {Number(price).toFixed(2).replace('.', ',')}</>}
+            🛒 Ver Preço na Amazon
           </a>
         </div>
       )}
