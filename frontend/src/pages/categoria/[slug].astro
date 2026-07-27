@@ -1,7 +1,8 @@
 ---
 import { getPosts } from '../../lib/api';
+import { getTenantFromHost } from '../../lib/tenant';
 
-const TENANT = 'viralbarato';
+const TENANT = getTenantFromHost(Astro.url.hostname);
 const { slug } = Astro.params;
 const posts = await getPosts(TENANT, slug!);
 const categoryName = posts[0]?.category_name || slug;

@@ -1,7 +1,8 @@
 ---
 import { getPost, registerClick } from '../../lib/api';
+import { getTenantFromHost } from '../../lib/tenant';
 
-const TENANT = 'viralbarato';
+const TENANT = getTenantFromHost(Astro.url.hostname);
 const { slug } = Astro.params;
 const post = await getPost(TENANT, slug!);
 

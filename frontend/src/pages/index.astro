@@ -1,9 +1,36 @@
 ---
 import { getPosts, getCategories } from '../lib/api';
+import { getTenantFromHost } from '../lib/tenant';
 
-const TENANT = 'viralbarato'; // TODO: detectar do domínio
+const TENANT = getTenantFromHost(Astro.url.hostname);
 const posts = await getPosts(TENANT);
 const categories = await getCategories(TENANT);
+
+const config = {
+  viralbarato: {
+    title: 'ViralBarato — Reviews e Menores Preços',
+    description: 'Descubra produtos com melhor custo-benefício. Reviews reais e links diretos para comprar.',
+    heading: '🔥 ViralBarato',
+    subtitle: 'Reviews honestas. Links diretos. Menor preço.',
+    footer: '© 2026 ViralBarato. Links de afiliado Amazon.',
+    accent: '#e63946',
+  },
+  mundonoprato: {
+    title: 'Mundo no Prato — Gastronomia Mundial',
+    description: 'Receitas, histórias e sabores de todos os cantos do planeta. Do Mediterrâneo à Ásia.',
+    heading: '🌍 Mundo no Prato',
+    subtitle: 'Receitas, ingredientes e histórias da gastronomia mundial.',
+    footer: '© 2026 Mundo no Prato. Gastronomia sem fronteiras.',
+    accent: '#c7512e',
+  },
+}[TENANT] || {
+  title: 'ViralBarato — Reviews e Menores Preços',
+  description: 'Descubra produtos com melhor custo-benefício.',
+  heading: 'ViralBarato',
+  subtitle: '',
+  footer: '© 2026 ViralBarato.',
+  accent: '#e63946',
+};
 ---
 
 <!doctype html>
@@ -11,10 +38,10 @@ const categories = await getCategories(TENANT);
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>ViralBarato — Reviews e Menores Preços</title>
-  <meta name="description" content="Descubra produtos com melhor custo-benefício. Reviews reais e links diretos para comprar." />
+  <title>{config.title}</title>
+  <meta name="description" content={config.description} />
   <style>
-    :root { --accent: #e63946; --bg: #f8f9fa; --card: #fff; --text: #212529; --muted: #6c757d; --border: #dee2e6; }
+    :root { --accent: {config.accent}; --bg: #f8f9fa; --card: #fff; --text: #212529; --muted: #6c757d; --border: #dee2e6; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
     .container { max-width: 1000px; margin: 0 auto; padding: 0 1rem; }
@@ -44,8 +71,8 @@ const categories = await getCategories(TENANT);
 <body>
   <header>
     <div class="container">
-      <h1>🔥 ViralBarato</h1>
-      <p>Reviews honestas. Links diretos. Menor preço.</p>
+      <h1>{config.heading}</h1>
+      <p>{config.subtitle}</p>
     </div>
   </header>
 
@@ -79,7 +106,7 @@ const categories = await getCategories(TENANT);
 
   <footer>
     <div class="container">
-      © 2026 ViralBarato. Links de afiliado Amazon.
+      {config.footer}
     </div>
   </footer>
 </body>
