@@ -11,6 +11,9 @@ export default defineConfig({
     host: '0.0.0.0',
   },
   vite: {
+    define: {
+      'process.env.BLOOM_API': 'process.env.BLOOM_API',
+    },
     server: {
       allowedHosts: ['bloom.expansao-ai.com.br', '.expansao-ai.com.br'],
     },

@@ -1,5 +1,7 @@
 // Cliente da API Bloom
-const API_BASE = process.env.BLOOM_API || 'http://localhost:8000';
+function getApiBase(): string {
+  return process.env.BLOOM_API || 'http://localhost:8000';
+}
 
 interface Post {
   id: number;
@@ -27,7 +29,7 @@ interface Category {
 }
 
 export async function getPosts(tenant: string, category?: string): Promise<Post[]> {
-  const url = new URL(`/api/v1/${tenant}/posts`, API_BASE);
+  const url = new URL(`/api/v1/${tenant}/posts`, getApiBase());
   if (category) url.searchParams.set('category', category);
   url.searchParams.set('page_size', '50');
   const res = await fetch(url.toString());
@@ -37,13 +39,13 @@ export async function getPosts(tenant: string, category?: string): Promise<Post[
 }
 
 export async function getPost(tenant: string, slug: string): Promise<Post | null> {
-  const res = await fetch(`${API_BASE}/api/v1/${tenant}/posts/${slug}`);
+  const res = await fetch(`${getApiBase()}/api/v1/${tenant}/posts/${slug}`);
   if (!res.ok) return null;
   return res.json();
 }
 
 export async function getCategories(tenant: string): Promise<Category[]> {
-  const res = await fetch(`${API_BASE}/api/v1/${tenant}/categories`);
+  const res = await fetch(`${getApiBase()}/api/v1/${tenant}/categories`);
   if (!res.ok) return [];
   const data = await res.json();
   return data.items;
