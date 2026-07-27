@@ -90,7 +90,14 @@ const config = {
     <div class="posts-grid">
       {posts.map(post => (
         <article class="card">
-          <img src={post.image_url || post.product_image || config.placeholderImg} alt={post.title} loading="lazy" />
+          <img src={post.image_url || post.product_image || `https://images.unsplash.com/photo-${({
+            'Eletrônicos': '1468495244123-6c6c332eeece',
+            'Beleza': '1522335789203-aabd35475b56',
+            'Casa & Cozinha': '1556909114-f6e7ad7c22f2',
+            'Esportes': '1571019613454-1cb2f99b2d8b',
+            'Pets': '1583511655857-d19b40a7a54e',
+            'Top 10': '1607082348824-0a96f2a4b9da',
+          })[post.category_name || ''] || '1607082348824-0a96f2a4b9da'}?w=400&fit=crop`} alt={post.title} loading="lazy" />
           <div class="card-body">
             <span class="card-cat">{post.category_name || 'Geral'}</span>
             <h2 class="card-title">
