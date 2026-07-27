@@ -14,6 +14,7 @@ const config = {
     subtitle: 'Reviews honestas. Links diretos. Menor preço.',
     footer: '© 2026 ViralBarato. Links de afiliado Amazon.',
     accent: '#e63946',
+    placeholderImg: 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=400',
   },
   mundonoprato: {
     title: 'Mundo no Prato — Gastronomia Mundial',
@@ -22,14 +23,16 @@ const config = {
     subtitle: 'Receitas, ingredientes e histórias da gastronomia mundial.',
     footer: '© 2026 Mundo no Prato. Gastronomia sem fronteiras.',
     accent: '#c7512e',
+    placeholderImg: 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=400',
   },
 }[TENANT] || {
-  title: 'ViralBarato — Reviews e Menores Preços',
-  description: 'Descubra produtos com melhor custo-benefício.',
+  title: 'ViralBarato',
+  description: 'Reviews e links diretos para comprar.',
   heading: 'ViralBarato',
   subtitle: '',
   footer: '© 2026 ViralBarato.',
   accent: '#e63946',
+  placeholderImg: 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=400',
 };
 ---
 
@@ -40,32 +43,32 @@ const config = {
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>{config.title}</title>
   <meta name="description" content={config.description} />
-  <style>
-    :root { --accent: {config.accent}; --bg: #f8f9fa; --card: #fff; --text: #212529; --muted: #6c757d; --border: #dee2e6; }
+  <style define:vars={{ accent: config.accent }}>
+    :root { --accent: var(--accent-custom, #e63946); }
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
-    .container { max-width: 1000px; margin: 0 auto; padding: 0 1rem; }
-    header { background: var(--accent); color: #fff; padding: 1.5rem 0; margin-bottom: 2rem; }
-    header h1 { font-size: 1.8rem; }
-    header p { opacity: 0.9; font-size: 1rem; margin-top: 0.25rem; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f4f5f7; color: #1a1a2e; line-height: 1.6; }
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 1.2rem; }
+    header { background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 70%, #000)); color: #fff; padding: 2.5rem 0 2rem; margin-bottom: 2rem; }
+    header h1 { font-size: 2rem; font-weight: 800; letter-spacing: -0.5px; }
+    header p { opacity: 0.85; font-size: 1.05rem; margin-top: 0.3rem; }
     .cats { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2rem; }
-    .cats a { background: var(--card); border: 1px solid var(--border); padding: 0.5rem 1rem; border-radius: 20px; text-decoration: none; color: var(--text); font-size: 0.9rem; transition: all 0.2s; }
+    .cats a { background: #fff; border: 1px solid #e0e0e0; padding: 0.45rem 1rem; border-radius: 20px; text-decoration: none; color: #555; font-size: 0.85rem; font-weight: 500; transition: all 0.2s; }
     .cats a:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
-    .posts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 3rem; }
-    .card { background: var(--card); border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); transition: transform 0.2s, box-shadow 0.2s; }
-    .card:hover { transform: translateY(-3px); box-shadow: 0 6px 16px rgba(0,0,0,0.12); }
-    .card img { width: 100%; height: 180px; object-fit: cover; background: #e9ecef; }
-    .card-body { padding: 1rem; }
-    .card-cat { display: inline-block; background: #f1f3f5; color: var(--muted); padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; }
-    .card-title { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.25rem; line-height: 1.3; }
-    .card-title a { color: var(--text); text-decoration: none; }
+    .posts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; margin-bottom: 3rem; }
+    .card { background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04); transition: transform 0.2s, box-shadow 0.2s; }
+    .card:hover { transform: translateY(-4px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
+    .card img { width: 100%; height: 200px; object-fit: cover; }
+    .card-body { padding: 1.1rem; }
+    .card-cat { display: inline-block; background: #f0f0f5; color: #777; padding: 0.2rem 0.7rem; border-radius: 12px; font-size: 0.72rem; margin-bottom: 0.6rem; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+    .card-title { font-size: 1rem; font-weight: 600; margin-bottom: 0.4rem; line-height: 1.35; }
+    .card-title a { color: #1a1a2e; text-decoration: none; }
     .card-title a:hover { color: var(--accent); }
-    .card-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem; }
-    .card-price { font-weight: 700; color: #2d6a4f; font-size: 1.1rem; }
-    .card-rating { color: #f4a261; font-size: 0.85rem; }
-    .card-date { font-size: 0.75rem; color: var(--muted); margin-top: 0.5rem; }
-    footer { text-align: center; padding: 2rem 0; color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--border); margin-top: 2rem; }
-    @media (max-width: 600px) { .posts-grid { grid-template-columns: 1fr; } }
+    .card-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 0.6rem; }
+    .card-price { font-weight: 700; color: #1b7a3d; font-size: 1.15rem; }
+    .card-rating { color: #e6a817; font-size: 0.82rem; }
+    .card-date { font-size: 0.72rem; color: #999; margin-top: 0.5rem; }
+    footer { text-align: center; padding: 2.5rem 0; color: #999; font-size: 0.85rem; border-top: 1px solid #eee; margin-top: 2rem; }
+    @media (max-width: 600px) { .posts-grid { grid-template-columns: 1fr; } header h1 { font-size: 1.5rem; } }
   </style>
 </head>
 <body>
@@ -87,15 +90,15 @@ const config = {
     <div class="posts-grid">
       {posts.map(post => (
         <article class="card">
-          <img src={post.image_url || 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=400'} alt={post.title} loading="lazy" />
+          <img src={post.image_url || post.product_image || config.placeholderImg} alt={post.title} loading="lazy" />
           <div class="card-body">
             <span class="card-cat">{post.category_name || 'Geral'}</span>
             <h2 class="card-title">
               <a href={`/blog/${post.slug}`}>{post.title}</a>
             </h2>
             <div class="card-meta">
-              {post.product_price && <span class="card-price">R$ {post.product_price.toFixed(2)}</span>}
-              {post.rating && <span class="card-rating">{'⭐'.repeat(Math.floor(post.rating))} {post.rating}</span>}
+              {post.price && <span class="card-price">R$ {Number(post.price).toFixed(2).replace('.', ',')}</span>}
+              {post.rating && <span class="card-rating">{'★'.repeat(Math.floor(post.rating))} {post.rating}</span>}
             </div>
             <div class="card-date">{new Date(post.published_at).toLocaleDateString('pt-BR')}</div>
           </div>
