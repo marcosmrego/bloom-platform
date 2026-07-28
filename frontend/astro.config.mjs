@@ -13,6 +13,7 @@ export default defineConfig({
   vite: {
     define: {
       'process.env.BLOOM_API': 'process.env.BLOOM_API',
+      'process.env.BLOOM_TENANT': 'process.env.BLOOM_TENANT',
     },
     server: {
       allowedHosts: ['bloom.expansao-ai.com.br', '.expansao-ai.com.br'],
