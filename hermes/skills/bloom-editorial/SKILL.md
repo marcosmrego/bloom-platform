@@ -9,6 +9,9 @@ Crie no máximo um draft editorial por execução para o tenant solicitado.
 3. Pesquise fontes atuais e confiáveis. Pelo menos duas páginas devem ter o
    conteúdo efetivamente extraído e lido. Resultados, snippets e URLs retornados
    apenas pelo buscador não contam como fonte consultada.
+   Afirmações de saúde, nutrição ou segurança exigem ao menos uma fonte oficial
+   ou estudo primário. Blogs comerciais não sustentam essas afirmações. Quando
+   houver conflito, prevalece a fonte oficial/primária ou a alegação é omitida.
 4. Não alegue experiência própria, testes físicos ou preços permanentes.
 5. No ViralBarato, só inclua ASIN após conferir que o destino corresponde
    exatamente ao produto. Na dúvida, omita produto, avaliação, prós e contras.
@@ -35,6 +38,8 @@ Crie no máximo um draft editorial por execução para o tenant solicitado.
 - Pelo menos duas fontes tiveram conteúdo extraído; liste quais evidências de
   cada fonte foram usadas. Nunca declare uma URL como consultada se apenas o
   resultado de busca foi visto.
+- Comparações de sódio, minerais ou benefícios à saúde possuem fonte
+  oficial/primária e não transformam pequenas diferenças em vantagem clínica.
 - Imagem é WebP exclusiva e foi persistida pelo Bloom.
 - ASIN, quando presente, foi validado no destino real.
 - Nenhum preço é apresentado como estável.
