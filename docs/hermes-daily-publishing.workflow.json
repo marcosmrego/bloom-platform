@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Hermes — Publicação diária do Bloom",
+    "subtitle": "Um job por dia, com pesquisa, gates editoriais e publicação transacional",
+    "output": "docs/hermes-daily-publishing.html"
+  },
+  "lanes": [
+    { "id": "scheduler", "label": "VPS / Scheduler" },
+    { "id": "hermes", "label": "Agente Hermes" },
+    { "id": "quality", "label": "Gates de Qualidade" },
+    { "id": "platform", "label": "Bloom Platform" },
+    { "id": "exceptions", "label": "Falhas e Revisão", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "start", "label": "Agendar", "fromCol": 0, "toCol": 1 },
+    { "id": "create", "label": "Pesquisar + produzir", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "release", "label": "Validar + publicar", "fromCol": 4, "toCol": 5, "variant": "security" }
+  ],
+  "groups": [
+    { "id": "editorial", "label": "Pipeline editorial", "lane": "hermes", "fromCol": 1, "toCol": 3, "variant": "emphasis" },
+    { "id": "blocking", "label": "Validações bloqueantes", "lane": "quality", "fromCol": 3, "toCol": 4, "variant": "security" },
+    { "id": "failure", "label": "Sem publicação parcial", "lane": "exceptions", "fromCol": 3, "toCol": 5, "variant": "security" }
+  ],
+  "mainPath": ["cron", "lock", "topic", "draft", "gate", "publish"],
+  "nodes": [
+    { "id": "cron", "lane": "scheduler", "col": 0, "type": "messagebus", "label": "Cron diário", "sublabel": "janela fixa + jitter" },
+    { "id": "lock", "lane": "hermes", "col": 1, "type": "security", "label": "Lock", "sublabel": "idempotência", "tag": "1 execução", "width": 50 },
+    { "id": "topic", "lane": "hermes", "col": 2, "type": "cloud", "label": "Pauta", "sublabel": "fontes", "width": 50 },
+    { "id": "draft", "lane": "hermes", "col": 3, "type": "backend", "label": "Gerar pacote", "sublabel": "texto + SEO + imagem" },
+    { "id": "gate", "lane": "quality", "col": 4, "type": "security", "label": "Quality gate", "sublabel": "duplicata + links + fatos", "tag": "bloqueante" },
+    { "id": "publish", "lane": "platform", "col": 5, "type": "database", "label": "Publicar", "sublabel": "API + PostgreSQL", "tag": "transação" },
+    { "id": "history", "lane": "platform", "col": 2, "type": "database", "label": "Histórico", "sublabel": "pautas + fingerprints" },
+    { "id": "assets", "lane": "platform", "col": 3, "type": "cloud", "label": "Imagem local", "sublabel": "WebP por tenant" },
+    { "id": "failed", "lane": "exceptions", "col": 4, "type": "security", "label": "Marcar falha", "sublabel": "motivo + evidências" },
+    { "id": "review", "lane": "exceptions", "col": 5, "type": "external", "label": "Revisão humana", "sublabel": "reprocessar depois" }
+  ],
+  "edges": [
+    { "from": "cron", "to": "lock", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "drop" },
+    { "from": "lock", "to": "topic", "variant": "default" },
+    { "from": "topic", "to": "draft", "variant": "default" },
+    { "from": "draft", "to": "gate", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "drop" },
+    { "from": "gate", "to": "publish", "label": "aprovado", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "drop", "labelAt": [563, 415] },
+    { "from": "history", "to": "topic", "label": "evitar repetição", "variant": "dashed", "fromSide": "top", "toSide": "bottom", "route": "up-channel" },
+    { "from": "draft", "to": "assets", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "route": "drop" },
+    { "from": "gate", "to": "failed", "label": "reprovado", "variant": "security", "role": "error", "fromSide": "bottom", "toSide": "top", "route": "drop", "labelAt": [525, 531] },
+    { "from": "failed", "to": "review", "variant": "dashed", "role": "branch" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Contrato do Hermes",
+      "items": [
+        "Executa uma pauta por job, nunca por tentativa",
+        "Produz JSON estruturado antes de tocar no banco",
+        "Não inventa ASIN, preço, experiência ou especificação",
+        "Publicação exige aprovação de todos os gates"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Falha segura",
+      "items": [
+        "Lock impede duas execuções simultâneas",
+        "Erro deixa rascunho e evidências, não post parcial",
+        "Retries têm limite e backoff",
+        "Revisão humana pode liberar novo processamento"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Operação",
+      "items": [
+        "Cron ou Scheduled Task no próprio Coolify",
+        "Secrets somente no runtime do worker",
+        "Logs em agent_logs e content_jobs",
+        "Healthcheck e alerta quando um dia fica sem job"
+      ]
+    }
+  ]
+}
