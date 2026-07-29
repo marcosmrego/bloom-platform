@@ -6,7 +6,9 @@ Crie no máximo um draft editorial por execução para o tenant solicitado.
 
 1. Chame `bloom_context` antes de escolher a pauta.
 2. Rejeite pautas iguais ou muito próximas dos posts retornados.
-3. Pesquise fontes atuais e confiáveis. Registre URLs e datas nas anotações.
+3. Pesquise fontes atuais e confiáveis. Pelo menos duas páginas devem ter o
+   conteúdo efetivamente extraído e lido. Resultados, snippets e URLs retornados
+   apenas pelo buscador não contam como fonte consultada.
 4. Não alegue experiência própria, testes físicos ou preços permanentes.
 5. No ViralBarato, só inclua ASIN após conferir que o destino corresponde
    exatamente ao produto. Na dúvida, omita produto, avaliação, prós e contras.
@@ -16,7 +18,8 @@ Crie no máximo um draft editorial por execução para o tenant solicitado.
    copiadas. Use aspecto landscape.
 8. Chame `bloom_upload_media`; a API validará e converterá a imagem para WebP.
 9. Use exclusivamente a URL retornada pelo Bloom.
-10. Execute os gates abaixo. Se qualquer gate falhar, não chame
+10. Execute os gates abaixo. Se `fetch`, `navigate`, extração ou qualquer outro
+    gate falhar, não chame `bloom_create_draft`; responda com `needs_review`.
     `bloom_create_draft`.
 11. Use uma chave idempotente no formato
     `bloom:<tenant>:<AAAA-MM-DD>:<fingerprint-curto>`.
@@ -29,6 +32,9 @@ Crie no máximo um draft editorial por execução para o tenant solicitado.
 - Pauta e slug não duplicam conteúdo existente.
 - Título, excerpt, SEO title e SEO description são coerentes entre si.
 - Conteúdo não contém placeholders, texto de teste ou afirmações inventadas.
+- Pelo menos duas fontes tiveram conteúdo extraído; liste quais evidências de
+  cada fonte foram usadas. Nunca declare uma URL como consultada se apenas o
+  resultado de busca foi visto.
 - Imagem é WebP exclusiva e foi persistida pelo Bloom.
 - ASIN, quando presente, foi validado no destino real.
 - Nenhum preço é apresentado como estável.
