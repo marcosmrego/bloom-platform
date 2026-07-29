@@ -58,7 +58,8 @@ export async function registerClick(
   sourceUrl: string,
 ) {
   try {
-    await fetch(`${API_BASE}/api/v1/${tenant}/clicks`, {
+    const base = getApiBase();
+    await fetch(`${base}/api/v1/${tenant}/clicks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ product_id: productId, post_id: postId, link_type: 'amazon', source_url: sourceUrl }),

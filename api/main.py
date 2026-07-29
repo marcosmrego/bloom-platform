@@ -9,7 +9,9 @@ from contextlib import asynccontextmanager
 
 import psycopg2
 import psycopg2.extras
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
+import asyncio
+from functools import partial
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -44,6 +46,13 @@ def get_db():
     conn = psycopg2.connect(**DB_CONFIG)
     conn.cursor_factory = psycopg2.extras.RealDictCursor
     return conn
+
+
+async def run_db_task(fn, *args, **kwargs):
+    """Executa uma função bloqueante de DB em threadpool e retorna o resultado."""
+    loop = asyncio.get_running_loop()
+    p = partial(fn, *args, **kwargs)
+    return await loop.run_in_executor(None, p)
 
 # ── FastAPI App ───────────────────────────────────
 @asynccontextmanager
@@ -149,44 +158,54 @@ class PaginatedResponse(BaseModel):
 # ── TENANTS ────────────────────────────────────────
 @app.get("/api/v1/tenants")
 async def list_tenants():
-    conn = get_db()
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM tenants WHERE status = 'active' ORDER BY name")
-        tenants = cur.fetchall()
-        return {"items": [dict(t) for t in tenants]}
-    finally:
-        conn.close()
+    def _sync():
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM tenants WHERE status = 'active' ORDER BY name")
+            tenants = cur.fetchall()
+            return {"items": [dict(t) for t in tenants]}
+        finally:
+            conn.close()
+
+    return await run_db_task(_sync)
 
 @app.get("/api/v1/tenants/{slug}")
 async def get_tenant(slug: str):
-    conn = get_db()
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM tenants WHERE slug = %s", (slug,))
-        t = cur.fetchone()
-        if not t:
-            return {"error": "Tenant not found"}, 404
-        return dict(t)
-    finally:
-        conn.close()
+    def _sync(slug_val: str):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM tenants WHERE slug = %s", (slug_val,))
+            t = cur.fetchone()
+            return t
+        finally:
+            conn.close()
+
+    t = await run_db_task(_sync, slug)
+    if not t:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return dict(t)
 
 # ── CATEGORIES ─────────────────────────────────────
 @app.get("/api/v1/{tenant_slug}/categories")
 async def list_categories(tenant_slug: str):
-    conn = get_db()
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT c.* FROM categories c
-            JOIN tenants t ON c.tenant_id = t.id
-            WHERE t.slug = %s
-            ORDER BY c.name
-        """, (tenant_slug,))
-        cats = cur.fetchall()
-        return {"items": [dict(c) for c in cats]}
-    finally:
-        conn.close()
+    def _sync(tslug: str):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT c.* FROM categories c
+                JOIN tenants t ON c.tenant_id = t.id
+                WHERE t.slug = %s
+                ORDER BY c.name
+            """, (tslug,))
+            cats = cur.fetchall()
+            return {"items": [dict(c) for c in cats]}
+        finally:
+            conn.close()
+
+    return await run_db_task(_sync, tenant_slug)
 
 # ── PRODUCTS ───────────────────────────────────────
 @app.get("/api/v1/{tenant_slug}/products")
@@ -196,36 +215,39 @@ async def list_products(
     page: int = 1,
     page_size: int = 20,
 ):
-    conn = get_db()
-    try:
-        cur = conn.cursor()
-        params = [tenant_slug]
-        where = "WHERE t.slug = %s AND pr.active = true"
+    def _sync(tslug: str, category_q: Optional[str], page_q: int, page_size_q: int):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            params = [tslug]
+            where = "WHERE t.slug = %s AND pr.active = true"
 
-        if category:
-            where += " AND c.slug = %s"
-            params.append(category)
+            if category_q:
+                where += " AND c.slug = %s"
+                params.append(category_q)
 
-        # Count
-        cur.execute(f"SELECT COUNT(*) as total FROM products pr JOIN tenants t ON pr.tenant_id = t.id LEFT JOIN categories c ON pr.category_id = c.id {where}", params)
-        total = cur.fetchone()["total"]
+            # Count
+            cur.execute(f"SELECT COUNT(*) as total FROM products pr JOIN tenants t ON pr.tenant_id = t.id LEFT JOIN categories c ON pr.category_id = c.id {where}", params)
+            total = cur.fetchone()["total"]
 
-        # Fetch
-        offset = (page - 1) * page_size
-        cur.execute(f"""
-            SELECT pr.*, c.name as category_name, t.name as tenant_name
-            FROM products pr
-            JOIN tenants t ON pr.tenant_id = t.id
-            LEFT JOIN categories c ON pr.category_id = c.id
-            {where}
-            ORDER BY pr.created_at DESC
-            LIMIT %s OFFSET %s
-        """, params + [page_size, offset])
-        items = [dict(row) for row in cur.fetchall()]
+            # Fetch
+            offset = (page_q - 1) * page_size_q
+            cur.execute(f"""
+                SELECT pr.*, c.name as category_name, t.name as tenant_name
+                FROM products pr
+                JOIN tenants t ON pr.tenant_id = t.id
+                LEFT JOIN categories c ON pr.category_id = c.id
+                {where}
+                ORDER BY pr.created_at DESC
+                LIMIT %s OFFSET %s
+            """, params + [page_size_q, offset])
+            items = [dict(row) for row in cur.fetchall()]
 
-        return {"items": items, "total": total, "page": page, "page_size": page_size}
-    finally:
-        conn.close()
+            return {"items": items, "total": total, "page": page_q, "page_size": page_size_q}
+        finally:
+            conn.close()
+
+    return await run_db_task(_sync, tenant_slug, category, page, page_size)
 
 # ── POSTS ──────────────────────────────────────────
 @app.get("/api/v1/{tenant_slug}/posts")
@@ -235,108 +257,123 @@ async def list_posts(
     page: int = 1,
     page_size: int = 12,
 ):
-    conn = get_db()
-    try:
-        cur = conn.cursor()
-        params = [tenant_slug]
-        where = "WHERE t.slug = %s AND p.status = 'published'"
+    def _sync(tslug: str, category_q: Optional[str], page_q: int, page_size_q: int):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            params = [tslug]
+            where = "WHERE t.slug = %s AND p.status = 'published'"
 
-        if category:
-            where += " AND p.category_slug = %s"
-            params.append(category)
+            if category_q:
+                where += " AND p.category_slug = %s"
+                params.append(category_q)
 
-        cur.execute(f"SELECT COUNT(*) as total FROM vw_posts_enriched p JOIN tenants t ON p.tenant_id = t.id {where}", params)
-        total = cur.fetchone()["total"]
+            cur.execute(f"SELECT COUNT(*) as total FROM vw_posts_enriched p JOIN tenants t ON p.tenant_id = t.id {where}", params)
+            total = cur.fetchone()["total"]
 
-        offset = (page - 1) * page_size
-        cur.execute(f"""
-            SELECT p.* FROM vw_posts_enriched p
-            JOIN tenants t ON p.tenant_id = t.id
-            {where}
-            ORDER BY p.published_at DESC
-            LIMIT %s OFFSET %s
-        """, params + [page_size, offset])
-        items = [dict(row) for row in cur.fetchall()]
+            offset = (page_q - 1) * page_size_q
+            cur.execute(f"""
+                SELECT p.* FROM vw_posts_enriched p
+                JOIN tenants t ON p.tenant_id = t.id
+                {where}
+                ORDER BY p.published_at DESC
+                LIMIT %s OFFSET %s
+            """, params + [page_size_q, offset])
+            items = [dict(row) for row in cur.fetchall()]
 
-        return {"items": items, "total": total, "page": page, "page_size": page_size}
-    finally:
-        conn.close()
+            return {"items": items, "total": total, "page": page_q, "page_size": page_size_q}
+        finally:
+            conn.close()
+
+    return await run_db_task(_sync, tenant_slug, category, page, page_size)
 
 @app.get("/api/v1/{tenant_slug}/posts/{slug}")
 async def get_post(tenant_slug: str, slug: str):
-    conn = get_db()
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT p.*, t.name as tenant_name, t.slug as tenant_slug, t.domain
-            FROM vw_posts_enriched p
-            JOIN tenants t ON p.tenant_id = t.id
-            WHERE t.slug = %s AND p.slug = %s AND p.status = 'published'
-        """, (tenant_slug, slug))
-        post = cur.fetchone()
-        if not post:
-            return {"error": "Post not found"}, 404
-        return dict(post)
-    finally:
-        conn.close()
+    def _sync(tslug: str, s: str):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT p.*, t.name as tenant_name, t.slug as tenant_slug, t.domain
+                FROM vw_posts_enriched p
+                JOIN tenants t ON p.tenant_id = t.id
+                WHERE t.slug = %s AND p.slug = %s AND p.status = 'published'
+            """, (tslug, s))
+            return cur.fetchone()
+        finally:
+            conn.close()
+
+    post = await run_db_task(_sync, tenant_slug, slug)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return dict(post)
 
 @app.post("/api/v1/{tenant_slug}/posts")
 async def create_post(tenant_slug: str, data: PostCreate):
-    conn = get_db()
-    try:
-        cur = conn.cursor()
+    def _sync(tslug: str, d: PostCreate):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
 
-        # Resolve tenant_id
-        cur.execute("SELECT id FROM tenants WHERE slug = %s", (tenant_slug,))
-        t = cur.fetchone()
-        if not t:
-            return {"error": "Tenant not found"}, 404
-        tenant_id = t["id"]
+            # Resolve tenant_id
+            cur.execute("SELECT id FROM tenants WHERE slug = %s", (tslug,))
+            t = cur.fetchone()
+            if not t:
+                return {"error": "Tenant not found"}, 404
+            tenant_id = t["id"]
 
-        # Resolve category_id (opcional)
-        category_id = None
-        if data.category_slug:
-            cur.execute("SELECT id FROM categories WHERE tenant_id = %s AND slug = %s", (tenant_id, data.category_slug))
-            cat = cur.fetchone()
-            if cat:
-                category_id = cat["id"]
+            # Resolve category_id (opcional)
+            category_id = None
+            if d.category_slug:
+                cur.execute("SELECT id FROM categories WHERE tenant_id = %s AND slug = %s", (tenant_id, d.category_slug))
+                cat = cur.fetchone()
+                if cat:
+                    category_id = cat["id"]
 
-        # Resolve product_id (opcional)
-        product_id = None
-        if data.product_asin:
-            cur.execute("SELECT id FROM products WHERE tenant_id = %s AND asin = %s", (tenant_id, data.product_asin))
-            prod = cur.fetchone()
-            if prod:
-                product_id = prod["id"]
+            # Resolve product_id (opcional)
+            product_id = None
+            if d.product_asin:
+                cur.execute("SELECT id FROM products WHERE tenant_id = %s AND asin = %s", (tenant_id, d.product_asin))
+                prod = cur.fetchone()
+                if prod:
+                    product_id = prod["id"]
 
-        # Auto-generate slug if not provided
-        slug = data.slug or data.title.lower().replace(" ", "-")[:100]
+            # Auto-generate slug if not provided
+            slug = d.slug or d.title.lower().replace(" ", "-")[:100]
 
-        cur.execute("""
-            INSERT INTO posts (tenant_id, title, slug, excerpt, content, image_url,
-                category_id, product_id, rating, pros, cons, status, tags, created_by,
-                published_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                CASE WHEN %s = 'published' THEN NOW() ELSE NULL END)
-            RETURNING id
-        """, (
-            tenant_id, data.title, slug, data.excerpt, data.content,
-            data.image_url, category_id, product_id, data.rating,
-            psycopg2.extras.Json(data.pros or []),
-            psycopg2.extras.Json(data.cons or []),
-            data.status,
-            psycopg2.extras.Json(data.tags or []),
-            data.created_by, data.status,
-        ))
-        post_id = cur.fetchone()["id"]
-        conn.commit()
+            cur.execute("""
+                INSERT INTO posts (tenant_id, title, slug, excerpt, content, image_url,
+                    category_id, product_id, rating, pros, cons, status, tags, created_by,
+                    published_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                    CASE WHEN %s = 'published' THEN NOW() ELSE NULL END)
+                RETURNING id
+            """, (
+                tenant_id, d.title, slug, d.excerpt, d.content,
+                d.image_url, category_id, product_id, d.rating,
+                psycopg2.extras.Json(d.pros or []),
+                psycopg2.extras.Json(d.cons or []),
+                d.status,
+                psycopg2.extras.Json(d.tags or []),
+                d.created_by, d.status,
+            ))
+            post_id = cur.fetchone()["id"]
+            conn.commit()
 
-        return {"status": "created", "id": post_id, "slug": slug}
-    except Exception as e:
-        conn.rollback()
-        return {"error": str(e)}, 500
-    finally:
-        conn.close()
+            return {"status": "created", "id": post_id, "slug": slug}
+        except Exception as e:
+            conn.rollback()
+            return {"error": str(e)}, 500
+        finally:
+            conn.close()
+
+    result = await run_db_task(_sync, tenant_slug, data)
+    # propagate HTTP-like errors
+    if isinstance(result, tuple) and result[1] == 404:
+        raise HTTPException(status_code=404, detail=result[0].get('error'))
+    if isinstance(result, tuple) and result[1] == 500:
+        raise HTTPException(status_code=500, detail=result[0].get('error'))
+    return result
 
 # ── CLICKS ─────────────────────────────────────────
 @app.post("/api/v1/{tenant_slug}/clicks")
@@ -347,28 +384,35 @@ async def register_click(
     link_type: str = "amazon",
     source_url: Optional[str] = None,
 ):
-    conn = get_db()
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM tenants WHERE slug = %s", (tenant_slug,))
-        t = cur.fetchone()
-        if not t:
-            return {"error": "Tenant not found"}, 404
+    def _sync(tslug: str, product_id_q: Optional[int], post_id_q: Optional[int], link_type_q: str, source_url_q: Optional[str]):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM tenants WHERE slug = %s", (tslug,))
+            t = cur.fetchone()
+            if not t:
+                return {"error": "Tenant not found"}, 404
 
-        import ipaddress
-        ip = "0.0.0.0"  # seria request.client.host com FastAPI real
+            ip = "0.0.0.0"
 
-        cur.execute("""
-            INSERT INTO clicks (tenant_id, product_id, post_id, link_type, source_url, ip_address)
-            VALUES (%s,%s,%s,%s,%s,%s)
-        """, (t["id"], product_id, post_id, link_type, source_url, ip))
-        conn.commit()
-        return {"status": "registered"}
-    except Exception as e:
-        conn.rollback()
-        return {"error": str(e)}, 500
-    finally:
-        conn.close()
+            cur.execute("""
+                INSERT INTO clicks (tenant_id, product_id, post_id, link_type, source_url, ip_address)
+                VALUES (%s,%s,%s,%s,%s,%s)
+            """, (t["id"], product_id_q, post_id_q, link_type_q, source_url_q, ip))
+            conn.commit()
+            return {"status": "registered"}
+        except Exception as e:
+            conn.rollback()
+            return {"error": str(e)}, 500
+        finally:
+            conn.close()
+
+    result = await run_db_task(_sync, tenant_slug, product_id, post_id, link_type, source_url)
+    if isinstance(result, tuple) and result[1] == 404:
+        raise HTTPException(status_code=404, detail=result[0].get('error'))
+    if isinstance(result, tuple) and result[1] == 500:
+        raise HTTPException(status_code=500, detail=result[0].get('error'))
+    return result
 
 # ── USERS ──────────────────────────────────────────
 @app.post("/api/v1/{tenant_slug}/users/subscribe")
@@ -378,28 +422,36 @@ async def subscribe_user(
     name: Optional[str] = None,
     source: str = "newsletter",
 ):
-    conn = get_db()
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM tenants WHERE slug = %s", (tenant_slug,))
-        t = cur.fetchone()
-        if not t:
-            return {"error": "Tenant not found"}, 404
+    def _sync(tslug: str, email_q: str, name_q: Optional[str], source_q: str):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM tenants WHERE slug = %s", (tslug,))
+            t = cur.fetchone()
+            if not t:
+                return {"error": "Tenant not found"}, 404
 
-        cur.execute("""
-            INSERT INTO users (tenant_id, email, name, source)
-            VALUES (%s,%s,%s,%s)
-            ON CONFLICT (tenant_id, email) DO UPDATE SET status = 'active', name = COALESCE(EXCLUDED.name, users.name)
-            RETURNING id
-        """, (t["id"], email, name, source))
-        user_id = cur.fetchone()["id"]
-        conn.commit()
-        return {"status": "subscribed", "user_id": user_id}
-    except Exception as e:
-        conn.rollback()
-        return {"error": str(e)}, 500
-    finally:
-        conn.close()
+            cur.execute("""
+                INSERT INTO users (tenant_id, email, name, source)
+                VALUES (%s,%s,%s,%s)
+                ON CONFLICT (tenant_id, email) DO UPDATE SET status = 'active', name = COALESCE(EXCLUDED.name, users.name)
+                RETURNING id
+            """, (t["id"], email_q, name_q, source_q))
+            user_id = cur.fetchone()["id"]
+            conn.commit()
+            return {"status": "subscribed", "user_id": user_id}
+        except Exception as e:
+            conn.rollback()
+            return {"error": str(e)}, 500
+        finally:
+            conn.close()
+
+    result = await run_db_task(_sync, tenant_slug, email, name, source)
+    if isinstance(result, tuple) and result[1] == 404:
+        raise HTTPException(status_code=404, detail=result[0].get('error'))
+    if isinstance(result, tuple) and result[1] == 500:
+        raise HTTPException(status_code=500, detail=result[0].get('error'))
+    return result
 
 # ── STATS ──────────────────────────────────────────
 @app.get("/api/v1/{tenant_slug}/stats")
