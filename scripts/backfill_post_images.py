@@ -1,31 +1,13 @@
 #!/usr/bin/env python3
 import argparse
-import hashlib
-from urllib.parse import quote
 
 import psycopg2
 
 from db_config import get_db_config
 
 
-IMAGE_BASE = "https://image.pollinations.ai/prompt/"
-
-
 def build_image_url(tenant_slug: str, post_id: int, title: str, category_slug: str | None) -> str:
-    if tenant_slug == "mundonoprato":
-        return f"/images/posts/mundonoprato/post-{post_id}.webp"
-
-    if tenant_slug == "viralbarato":
-        prompt = (
-            f"professional ecommerce product photography, {title}, "
-            "single product, clean neutral background, realistic, no text, no logo"
-        )
-    seed_source = f"{tenant_slug}:{post_id}:{title}".encode("utf-8")
-    seed = int(hashlib.sha256(seed_source).hexdigest()[:8], 16)
-    return (
-        f"{IMAGE_BASE}{quote(prompt, safe='')}"
-        f"?width=1200&height=630&nologo=true&seed={seed}"
-    )
+    return f"/images/posts/{tenant_slug}/post-{post_id}.webp"
 
 
 def find_targets(cur):
@@ -38,7 +20,10 @@ def find_targets(cur):
           ON c.id = p.category_id AND c.tenant_id = p.tenant_id
         WHERE (
             t.slug = 'viralbarato'
-            AND NULLIF(BTRIM(p.image_url), '') IS NULL
+            AND (
+                NULLIF(BTRIM(p.image_url), '') IS NULL
+                OR p.image_url !~ '^/images/posts/viralbarato/post-[0-9]+[.]webp$'
+            )
         ) OR (
             t.slug = 'mundonoprato'
             AND p.image_url !~ '^/images/posts/mundonoprato/post-[0-9]+[.]webp$'
