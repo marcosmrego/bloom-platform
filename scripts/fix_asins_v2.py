@@ -1,10 +1,8 @@
 """V2: Cria produtos faltantes e vincula todos os posts."""
 import os, re, yaml, psycopg2, unicodedata
+from db_config import get_db_config, get_tenant_id
 
-DB = {
-    'host': '212.85.22.227', 'port': 5432, 'dbname': 'bloom',
-    'user': 'postgres', 'password': '2qS3CODTaQ42mgOYvgb5FKLp8906qTCb94vg5XQKziszz12O8lC6En2GJsW9qQ0q'
-}
+DB = get_db_config()
 
 def extract_asin(url):
     m = re.search(r'/dp/([A-Z0-9]{10})', url)
@@ -28,6 +26,7 @@ def words_match(a, b, min_words=2):
 
 conn = psycopg2.connect(**DB)
 cur = conn.cursor()
+tenant_id = get_tenant_id(cur)
 
 # 1. Extrair ASINs + nomes dos markdowns
 blog_dir = '/opt/data/viralbarato/src/content/blog'
@@ -66,7 +65,7 @@ for root, dirs, files in os.walk(blog_dir):
 print(f'{len(post_data)} posts com ASIN')
 
 # 2. Buscar produtos existentes
-cur.execute('SELECT id, asin, title FROM products WHERE tenant_id=1')
+cur.execute('SELECT id, asin, title FROM products WHERE tenant_id=%s', (tenant_id,))
 products = [(r[0], r[1], r[2]) for r in cur.fetchall()]
 print(f'{len(products)} produtos no DB')
 
@@ -81,7 +80,7 @@ for filename, data in post_data.items():
     cat = data['cat']
     
     # Procurar produto por ASIN primeiro
-    cur.execute('SELECT id, asin FROM products WHERE tenant_id=1 AND asin=%s', (asin,))
+    cur.execute('SELECT id, asin FROM products WHERE tenant_id=%s AND asin=%s', (tenant_id, asin))
     row = cur.fetchone()
     
     if not row:
@@ -103,14 +102,14 @@ for filename, data in post_data.items():
                            'Casa e Cozinha':'casa-cozinha','Beleza':'beleza',
                            'Esportes':'esportes','Pets':'pets','TOP 10':'top10'}
             cat_slug = cat_slug_map.get(cat, 'eletronicos')
-            cur.execute('SELECT id FROM categories WHERE tenant_id=1 AND slug=%s', (cat_slug,))
+            cur.execute('SELECT id FROM categories WHERE tenant_id=%s AND slug=%s', (tenant_id, cat_slug))
             crow = cur.fetchone()
             cat_id = crow[0] if crow else 1
             
             clean_name = name[:200]
             cur.execute(
-                'INSERT INTO products (tenant_id, asin, title, category_id, price, active) VALUES (1, %s, %s, %s, 0, true) RETURNING id',
-                (asin, clean_name, cat_id)
+                'INSERT INTO products (tenant_id, asin, title, category_id, price, active) VALUES (%s, %s, %s, %s, 0, true) RETURNING id',
+                (tenant_id, asin, clean_name, cat_id)
             )
             pid = cur.fetchone()[0]
             created += 1
@@ -120,7 +119,7 @@ for filename, data in post_data.items():
     # Vincular post ao produto
     # Achar o post pelo título aproximado
     norm_name = normalize(name)[:30]
-    cur.execute("SELECT id FROM posts WHERE tenant_id=1 AND product_id IS NULL")
+    cur.execute("SELECT id FROM posts WHERE tenant_id=%s AND product_id IS NULL", (tenant_id,))
     for (post_id,) in cur.fetchall():
         # Já foi vinculado? Pular
         cur.execute('SELECT product_id FROM posts WHERE id=%s', (post_id,))
@@ -138,9 +137,9 @@ for filename, data in post_data.items():
 conn.commit()
 
 # Resultado final
-cur.execute('SELECT COUNT(*), COUNT(product_id) FROM posts WHERE tenant_id=1')
+cur.execute('SELECT COUNT(*), COUNT(product_id) FROM posts WHERE tenant_id=%s', (tenant_id,))
 total, with_prod = cur.fetchone()
-cur.execute('SELECT COUNT(*) FROM products WHERE tenant_id=1')
+cur.execute('SELECT COUNT(*) FROM products WHERE tenant_id=%s', (tenant_id,))
 prod_count = cur.fetchone()[0]
 
 print(f'Criados: {created}, ASINs atualizados: {updates}, Posts vinculados: {links}')
@@ -150,7 +149,7 @@ print(f'Resultado: {with_prod}/{total} posts com produto, {prod_count} produtos 
 cur.execute("""SELECT p.slug, p.title, pr.asin, pr.price, 
     'https://www.amazon.com.br/dp/' || pr.asin || '?tag=marcosmrego-20' as affiliate_url
     FROM posts p JOIN products pr ON p.product_id=pr.id 
-    WHERE p.tenant_id=1 LIMIT 3""")
+    WHERE p.tenant_id=%s LIMIT 3""", (tenant_id,))
 for r in cur.fetchall():
     print(f'  {r[1][:40]} → {r[4]}')
 

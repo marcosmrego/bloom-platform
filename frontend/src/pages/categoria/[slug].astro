@@ -1,21 +1,15 @@
 ---
-import { getPosts } from '../../lib/api';
+import { getCategories, getPosts } from '../../lib/api';
 import { getTenantFromHost } from '../../lib/tenant';
+import { getPostImage, getSiteConfig } from '../../lib/site';
 
 const TENANT = getTenantFromHost(Astro.url.hostname);
 const { slug } = Astro.params;
 const posts = await getPosts(TENANT, slug!);
-const categoryName = posts[0]?.category_name || slug;
-
-// Mapeia slug para nome
-const catNames: Record<string, string> = {
-  eletronicos: 'Eletrônicos',
-  'casa-cozinha': 'Casa & Cozinha',
-  beleza: 'Beleza',
-  esportes: 'Esportes',
-  pets: 'Pets',
-};
-const displayName = catNames[slug!] || slug;
+const categories = await getCategories(TENANT);
+const config = getSiteConfig(TENANT);
+const category = categories.find(item => item.slug === slug);
+const displayName = category?.name || posts[0]?.category_name || slug;
 ---
 
 <!doctype html>
@@ -23,10 +17,10 @@ const displayName = catNames[slug!] || slug;
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>{displayName} — ViralBarato</title>
-  <meta name="description" content="Reviews de {displayName.toLowerCase()} com os melhores preços." />
-  <style>
-    :root { --accent: #e63946; --bg: #f8f9fa; --card: #fff; --text: #212529; --muted: #6c757d; --border: #dee2e6; }
+  <title>{displayName} — {config.name}</title>
+  <meta name="description" content={`${config.contentLabelPlural} de ${displayName?.toLowerCase()} em ${config.name}.`} />
+  <style define:vars={{ siteAccent: config.accent }}>
+    :root { --accent: var(--siteAccent); --bg: #f8f9fa; --card: #fff; --text: #212529; --muted: #6c757d; --border: #dee2e6; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
     .container { max-width: 1000px; margin: 0 auto; padding: 0 1rem; }
@@ -46,16 +40,16 @@ const displayName = catNames[slug!] || slug;
   </style>
 </head>
 <body>
-  <header><div class="container"><a href="/">← ViralBarato</a> / <strong>{displayName}</strong></div></header>
+  <header><div class="container"><a href="/">← {config.name}</a> / <strong>{displayName}</strong></div></header>
   <main class="container">
-    <h2 style="margin-bottom:1.5rem">{displayName} ({posts.length} reviews)</h2>
+    <h2 style="margin-bottom:1.5rem">{displayName} ({posts.length} {posts.length === 1 ? config.contentLabel : config.contentLabelPlural})</h2>
     <div class="posts-grid">
       {posts.map(post => (
         <article class="card">
-          <img src={post.image_url || 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=400'} alt={post.title} loading="lazy" />
+          <img src={getPostImage(config, post)} alt={post.title} loading="lazy" />
           <div class="card-body">
             <span class="card-cat">{post.category_name}</span>
-            <h2 class="card-title"><a href={`/blog/${post.slug}`}>{post.title}</a></h2>
+            <h2 class="card-title"><a href={`/blog/${encodeURIComponent(post.slug)}`}>{post.title}</a></h2>
             <div class="card-meta">
               {post.product_price && <span class="card-price">R$ {post.product_price.toFixed(2)}</span>}
               {post.rating && <span class="card-rating">{'⭐'.repeat(Math.floor(post.rating))} {post.rating}</span>}

@@ -14,6 +14,5 @@ COPY --from=build /app/package.json ./
 ENV HOST=0.0.0.0
 ENV PORT=3000
 ENV BLOOM_API=http://bloom-api:8000
-ENV BLOOM_TENANT=viralbarato
 EXPOSE 3000
 CMD ["node", "dist/server/entry.mjs"]

@@ -4,6 +4,8 @@ FastAPI core: tenants, products, posts, categories, users, clicks, campaigns
 """
 import os
 import logging
+import re
+import unicodedata
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -18,24 +20,49 @@ from typing import Optional, List, Dict, Any
 
 # ── Config ────────────────────────────────────────
 def get_db_password():
-    """Lê senha do vault (fallback: fluxo .env)"""
-    vault = Path("/opt/data/vault/credentials/postgres_password.txt")
-    if vault.exists():
-        return vault.read_text().strip()
-    env = Path("/opt/data/fluxo-de-investimentos-v2/.env")
-    if env.exists():
-        for raw_line in env.read_text().split("\n"):
-            if "=" in raw_line and raw_line.split("=")[0].strip() == "DB_PASSWORD":
-                return raw_line.split("=", 1)[1].strip()
+    """Lê senha de variável ou arquivo explicitamente configurado."""
+    password_file = os.getenv("DB_PASSWORD_FILE")
+    if password_file:
+        return Path(password_file).read_text(encoding="utf-8").strip()
     return os.getenv("DB_PASSWORD", "")
 
 DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "212.85.22.227"),
+    "host": os.getenv("DB_HOST", "localhost"),
     "port": int(os.getenv("DB_PORT", "5432")),
     "dbname": os.getenv("DB_NAME", "bloom"),
     "user": os.getenv("DB_USER", "postgres"),
     "password": get_db_password(),
 }
+
+SLUG_MAX_LENGTH = 100
+
+
+def slugify(value: str, max_length: int = SLUG_MAX_LENGTH) -> str:
+    """Cria um segmento de URL ASCII, estável e sem pontuação reservada."""
+    normalized = unicodedata.normalize("NFKD", value)
+    ascii_value = normalized.encode("ascii", "ignore").decode("ascii").lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_value).strip("-")
+    slug = slug[:max_length].rstrip("-")
+    if not slug:
+        raise ValueError("Title or slug must contain at least one letter or number")
+    return slug
+
+
+def unique_post_slug(cur, tenant_id: int, value: str) -> str:
+    """Garante unicidade do slug dentro do tenant."""
+    base = slugify(value)
+    candidate = base
+    suffix = 2
+    while True:
+        cur.execute(
+            "SELECT 1 FROM posts WHERE tenant_id = %s AND slug = %s",
+            (tenant_id, candidate),
+        )
+        if not cur.fetchone():
+            return candidate
+        suffix_text = f"-{suffix}"
+        candidate = f"{base[:SLUG_MAX_LENGTH - len(suffix_text)].rstrip('-')}{suffix_text}"
+        suffix += 1
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bloom")
@@ -299,7 +326,24 @@ async def get_post(tenant_slug: str, slug: str):
                 JOIN tenants t ON p.tenant_id = t.id
                 WHERE t.slug = %s AND p.slug = %s AND p.status = 'published'
             """, (tslug, s))
-            return cur.fetchone()
+            post = cur.fetchone()
+            if post:
+                return post
+
+            # Compatibilidade com slugs antigos após a normalização.
+            try:
+                cur.execute("""
+                    SELECT p.*, t.name as tenant_name, t.slug as tenant_slug, t.domain
+                    FROM post_slug_redirects r
+                    JOIN vw_posts_enriched p
+                      ON p.id = r.post_id AND p.tenant_id = r.tenant_id
+                    JOIN tenants t ON p.tenant_id = t.id
+                    WHERE t.slug = %s AND r.old_slug = %s AND p.status = 'published'
+                """, (tslug, s))
+                return cur.fetchone()
+            except psycopg2.errors.UndefinedTable:
+                conn.rollback()
+                return None
         finally:
             conn.close()
 
@@ -338,8 +382,11 @@ async def create_post(tenant_slug: str, data: PostCreate):
                 if prod:
                     product_id = prod["id"]
 
-            # Auto-generate slug if not provided
-            slug = d.slug or d.title.lower().replace(" ", "-")[:100]
+            # Normaliza slugs fornecidos e resolve colisões dentro do tenant.
+            try:
+                slug = unique_post_slug(cur, tenant_id, d.slug or d.title)
+            except ValueError as exc:
+                return {"error": str(exc)}, 422
 
             cur.execute("""
                 INSERT INTO posts (tenant_id, title, slug, excerpt, content, image_url,
@@ -371,6 +418,8 @@ async def create_post(tenant_slug: str, data: PostCreate):
     # propagate HTTP-like errors
     if isinstance(result, tuple) and result[1] == 404:
         raise HTTPException(status_code=404, detail=result[0].get('error'))
+    if isinstance(result, tuple) and result[1] == 422:
+        raise HTTPException(status_code=422, detail=result[0].get('error'))
     if isinstance(result, tuple) and result[1] == 500:
         raise HTTPException(status_code=500, detail=result[0].get('error'))
     return result
@@ -393,6 +442,22 @@ async def register_click(
             if not t:
                 return {"error": "Tenant not found"}, 404
 
+            if product_id_q is not None:
+                cur.execute(
+                    "SELECT 1 FROM products WHERE id = %s AND tenant_id = %s",
+                    (product_id_q, t["id"]),
+                )
+                if not cur.fetchone():
+                    return {"error": "Product does not belong to tenant"}, 422
+
+            if post_id_q is not None:
+                cur.execute(
+                    "SELECT 1 FROM posts WHERE id = %s AND tenant_id = %s",
+                    (post_id_q, t["id"]),
+                )
+                if not cur.fetchone():
+                    return {"error": "Post does not belong to tenant"}, 422
+
             ip = "0.0.0.0"
 
             cur.execute("""
@@ -410,6 +475,8 @@ async def register_click(
     result = await run_db_task(_sync, tenant_slug, product_id, post_id, link_type, source_url)
     if isinstance(result, tuple) and result[1] == 404:
         raise HTTPException(status_code=404, detail=result[0].get('error'))
+    if isinstance(result, tuple) and result[1] == 422:
+        raise HTTPException(status_code=422, detail=result[0].get('error'))
     if isinstance(result, tuple) and result[1] == 500:
         raise HTTPException(status_code=500, detail=result[0].get('error'))
     return result

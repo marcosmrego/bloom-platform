@@ -3,13 +3,13 @@ version: '3.8'
 services:
   bloom-api:
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
     container_name: bloom-api
     ports:
       - "8001:8000"
     environment:
-      - DB_HOST=212.85.22.227
+      - DB_HOST=${DB_HOST:-postgres}
       - DB_PORT=5432
       - DB_NAME=bloom
       - DB_USER=postgres
@@ -18,13 +18,14 @@ services:
 
   bloom-frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
     container_name: bloom-frontend
     ports:
       - "3001:3000"
     environment:
       - BLOOM_API=http://bloom-api:8000
+      - BLOOM_TENANT=${BLOOM_TENANT:-}
       - PORT=3000
     depends_on:
       - bloom-api

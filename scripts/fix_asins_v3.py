@@ -1,7 +1,8 @@
 """V3: Vincula posts a produtos usando ASINs EXATOS dos markdowns originais."""
 import os, re, yaml, psycopg2, unicodedata
+from db_config import get_db_config, get_tenant_id
 
-DB = {'host':'212.85.22.227','port':5432,'dbname':'bloom','user':'postgres','password':'2qS3CODTaQ42mgOYvgb5FKLp8906qTCb94vg5XQKziszz12O8lC6En2GJsW9qQ0q'}
+DB = get_db_config()
 
 def extract_asin(url):
     m = re.search(r'/dp/([A-Z0-9]{10})', url)
@@ -49,7 +50,8 @@ print(f'{len(md_data)} markdowns com ASIN')
 # 2. Buscar posts e dar match exato por título normalizado
 conn = psycopg2.connect(**DB)
 cur = conn.cursor()
-cur.execute('SELECT id, title FROM posts WHERE tenant_id=1')
+tenant_id = get_tenant_id(cur)
+cur.execute('SELECT id, title FROM posts WHERE tenant_id=%s', (tenant_id,))
 posts = [(r[0], r[1], normalize(r[1])) for r in cur.fetchall()]
 
 linked = 0
@@ -90,7 +92,7 @@ for post_id, title, norm_title in posts:
     prod_name = data['prod_name']
     
     # Achar ou criar produto pelo ASIN
-    cur.execute('SELECT id, title, price FROM products WHERE tenant_id=1 AND asin=%s', (asin,))
+    cur.execute('SELECT id, title, price FROM products WHERE tenant_id=%s AND asin=%s', (tenant_id, asin))
     row = cur.fetchone()
     
     if row:
@@ -102,21 +104,21 @@ for post_id, title, norm_title in posts:
         # Criar produto
         clean_name = prod_name[:200]
         cur.execute(
-            'INSERT INTO products (tenant_id, asin, title, price, active) VALUES (1, %s, %s, %s, true) RETURNING id',
-            (asin, clean_name, price)
+            'INSERT INTO products (tenant_id, asin, title, price, active) VALUES (%s, %s, %s, %s, true) RETURNING id',
+            (tenant_id, asin, clean_name, price)
         )
         pid = cur.fetchone()[0]
     
     # Vincular
     cur.execute('UPDATE posts SET product_id=%s WHERE id=%s', (pid, post_id))
     linked += 1
-    print(f'  {title[:50]:50s} → {asin} R\$ {price:.2f}')
+        print(f'  {title[:50]:50s} → {asin} R$ {price:.2f}')
 
 conn.commit()
 print(f'\nVinculados: {linked}, sem match: {errors}')
 
 # Resultado
-cur.execute('SELECT COUNT(*), COUNT(product_id) FROM posts WHERE tenant_id=1')
+cur.execute('SELECT COUNT(*), COUNT(product_id) FROM posts WHERE tenant_id=%s', (tenant_id,))
 total, with_prod = cur.fetchone()
 print(f'{with_prod}/{total} posts com produto')
 

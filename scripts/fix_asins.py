@@ -3,11 +3,9 @@ Corrige ASINs dos produtos e vincula posts aos produtos no banco Bloom.
 Lê os ASINs reais dos markdowns do ViralBarato.
 """
 import os, re, yaml, psycopg2
+from db_config import get_db_config, get_tenant_id
 
-DB = {
-    'host': '212.85.22.227', 'port': 5432, 'dbname': 'bloom',
-    'user': 'postgres', 'password': '2qS3CODTaQ42mgOYvgb5FKLp8906qTCb94vg5XQKziszz12O8lC6En2GJsW9qQ0q'
-}
+DB = get_db_config()
 
 def extract_asin(url):
     m = re.search(r'/dp/([A-Z0-9]{10})', url)
@@ -62,9 +60,10 @@ print(f'\n{len(post_asins)} produtos com ASIN extraídos')
 # 2. Conectar ao banco e atualizar
 conn = psycopg2.connect(**DB)
 cur = conn.cursor()
+tenant_id = get_tenant_id(cur)
 
 # Buscar todos os produtos do ViralBarato
-cur.execute('SELECT id, asin, title FROM products WHERE tenant_id=1')
+cur.execute('SELECT id, asin, title FROM products WHERE tenant_id=%s', (tenant_id,))
 products = {r[2].lower(): (r[0], r[1], r[2]) for r in cur.fetchall()}
 
 updated_asins = 0
@@ -95,7 +94,7 @@ conn.commit()
 print(f'\nASINs atualizados: {updated_asins}, produtos com match: {matched}/{len(post_asins)}')
 
 # 3. Vincular posts aos produtos pelo ASIN
-cur.execute('SELECT id, slug, title FROM posts WHERE tenant_id=1 AND product_id IS NULL')
+cur.execute('SELECT id, slug, title FROM posts WHERE tenant_id=%s AND product_id IS NULL', (tenant_id,))
 unlinked = cur.fetchall()
 print(f'\nPosts sem produto: {len(unlinked)}')
 
@@ -106,7 +105,7 @@ for post_id, slug, title in unlinked:
         # Match pelo título do post ou nome do produto
         if prod_name.lower()[:15] in title.lower() or title.lower()[:15] in prod_name.lower():
             # Achar product_id pelo ASIN
-            cur.execute('SELECT id FROM products WHERE tenant_id=1 AND asin=%s', (asin,))
+            cur.execute('SELECT id FROM products WHERE tenant_id=%s AND asin=%s', (tenant_id, asin))
             row = cur.fetchone()
             if row:
                 cur.execute('UPDATE posts SET product_id=%s WHERE id=%s', (row[0], post_id))
@@ -118,7 +117,7 @@ conn.commit()
 print(f'Posts vinculados: {linked}')
 
 # 4. Verificar resultado
-cur.execute('SELECT COUNT(*), COUNT(product_id) FROM posts WHERE tenant_id=1')
+cur.execute('SELECT COUNT(*), COUNT(product_id) FROM posts WHERE tenant_id=%s', (tenant_id,))
 total, with_product = cur.fetchone()
 print(f'\nResultado: {with_product}/{total} posts com produto vinculado')
 

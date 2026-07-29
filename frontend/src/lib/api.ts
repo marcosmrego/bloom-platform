@@ -3,7 +3,7 @@ function getApiBase(): string {
   return process.env.BLOOM_API || 'http://localhost:8000';
 }
 
-interface Post {
+export interface Post {
   id: number;
   title: string;
   slug: string;
@@ -17,7 +17,9 @@ interface Post {
   category_name: string | null;
   category_slug: string | null;
   product_title: string | null;
+  price?: number | null;
   product_price: number | null;
+  product_image: string | null;
   affiliate_url: string | null;
   tenant_name?: string;
 }
@@ -39,7 +41,7 @@ export async function getPosts(tenant: string, category?: string): Promise<Post[
 }
 
 export async function getPost(tenant: string, slug: string): Promise<Post | null> {
-  const res = await fetch(`${getApiBase()}/api/v1/${tenant}/posts/${slug}`);
+  const res = await fetch(`${getApiBase()}/api/v1/${encodeURIComponent(tenant)}/posts/${encodeURIComponent(slug)}`);
   if (!res.ok) return null;
   return res.json();
 }

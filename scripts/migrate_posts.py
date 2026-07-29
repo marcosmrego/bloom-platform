@@ -3,7 +3,10 @@ Migra posts dos blogs antigos (Astro SSG) para a plataforma Bloom via API.
 """
 import os, re, yaml, json, urllib.request, sys, time
 
-API_URL = "http://pw3vklu294cbqlk3ncpl9xez.212.85.22.227.sslip.io"
+API_URL = os.getenv("BLOOM_API")
+if not API_URL:
+    raise RuntimeError("BLOOM_API must be set explicitly")
+API_URL = API_URL.rstrip("/")
 
 # Mapeamento de categorias do frontmatter → slugs do DB
 CATEGORY_MAP = {

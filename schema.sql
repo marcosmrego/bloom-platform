@@ -32,12 +32,13 @@ ON CONFLICT (slug) DO NOTHING;
 -- ═══════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS categories (
     id          SERIAL PRIMARY KEY,
-    tenant_id   INT REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id   INT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name        VARCHAR(100) NOT NULL,
     slug        VARCHAR(100) NOT NULL,
     description TEXT,
     created_at  TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(tenant_id, slug)
+    UNIQUE(tenant_id, slug),
+    UNIQUE(id, tenant_id)
 );
 
 -- ═══════════════════════════════════════════════════
@@ -45,21 +46,24 @@ CREATE TABLE IF NOT EXISTS categories (
 -- ═══════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS products (
     id           SERIAL PRIMARY KEY,
-    tenant_id    INT REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id    INT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     asin         VARCHAR(10) NOT NULL,             -- B09B8VGCR8
     title        VARCHAR(500) NOT NULL,
     description  TEXT,
     image_url    VARCHAR(1000),
     price        DECIMAL(10,2),
     price_updated_at TIMESTAMPTZ,
-    category_id  INT REFERENCES categories(id),
+    category_id  INT,
     affiliate_url VARCHAR(1000) GENERATED ALWAYS AS (
         'https://www.amazon.com.br/dp/' || asin || '?tag=marcosmrego-20'
     ) STORED,
     active       BOOLEAN DEFAULT TRUE,
     created_at   TIMESTAMPTZ DEFAULT NOW(),
     updated_at   TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(tenant_id, asin)
+    UNIQUE(tenant_id, asin),
+    UNIQUE(id, tenant_id),
+    FOREIGN KEY (category_id, tenant_id)
+        REFERENCES categories(id, tenant_id)
 );
 
 -- Índices
@@ -72,14 +76,14 @@ CREATE INDEX IF NOT EXISTS idx_products_active ON products(active) WHERE active 
 -- ═══════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS posts (
     id              SERIAL PRIMARY KEY,
-    tenant_id       INT REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id       INT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     title           VARCHAR(500) NOT NULL,
     slug            VARCHAR(500) NOT NULL,
     excerpt         TEXT,
     content         TEXT NOT NULL,                  -- markdown
     image_url       VARCHAR(1000),
-    category_id     INT REFERENCES categories(id),
-    product_id      INT REFERENCES products(id),
+    category_id     INT,
+    product_id      INT,
     rating          DECIMAL(2,1) CHECK (rating >= 0 AND rating <= 5),
     pros            JSONB DEFAULT '[]',
     cons            JSONB DEFAULT '[]',
@@ -91,7 +95,22 @@ CREATE TABLE IF NOT EXISTS posts (
     created_by      VARCHAR(50),                   -- 'hermes', 'editor-viralbarato', etc
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     updated_at      TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(tenant_id, slug)
+    UNIQUE(tenant_id, slug),
+    UNIQUE(id, tenant_id),
+    FOREIGN KEY (category_id, tenant_id)
+        REFERENCES categories(id, tenant_id),
+    FOREIGN KEY (product_id, tenant_id)
+        REFERENCES products(id, tenant_id)
+);
+
+CREATE TABLE IF NOT EXISTS post_slug_redirects (
+    tenant_id   INT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    old_slug    VARCHAR(500) NOT NULL,
+    post_id     INT NOT NULL,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, old_slug),
+    FOREIGN KEY (post_id, tenant_id)
+        REFERENCES posts(id, tenant_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_posts_tenant ON posts(tenant_id);
@@ -105,7 +124,7 @@ CREATE INDEX IF NOT EXISTS idx_posts_product ON posts(product_id);
 -- ═══════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS users (
     id              SERIAL PRIMARY KEY,
-    tenant_id       INT REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id       INT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     email           VARCHAR(255) NOT NULL,
     name            VARCHAR(200),
     phone           VARCHAR(30),
@@ -114,7 +133,8 @@ CREATE TABLE IF NOT EXISTS users (
     status          VARCHAR(20) DEFAULT 'active',
     subscribed_at   TIMESTAMPTZ DEFAULT NOW(),
     unsubscribed_at TIMESTAMPTZ,
-    UNIQUE(tenant_id, email)
+    UNIQUE(tenant_id, email),
+    UNIQUE(id, tenant_id)
 );
 
 -- ═══════════════════════════════════════════════════
@@ -122,15 +142,21 @@ CREATE TABLE IF NOT EXISTS users (
 -- ═══════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS clicks (
     id          BIGSERIAL PRIMARY KEY,
-    tenant_id   INT REFERENCES tenants(id) ON DELETE CASCADE,
-    product_id  INT REFERENCES products(id),
-    post_id     INT REFERENCES posts(id),
-    user_id     INT REFERENCES users(id),
+    tenant_id   INT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    product_id  INT,
+    post_id     INT,
+    user_id     INT,
     link_type   VARCHAR(20) NOT NULL,               -- 'amazon', 'adsense', 'adcash'
     source_url  VARCHAR(1000),
     ip_address  VARCHAR(50),
     user_agent  TEXT,
-    created_at  TIMESTAMPTZ DEFAULT NOW()
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    FOREIGN KEY (product_id, tenant_id)
+        REFERENCES products(id, tenant_id),
+    FOREIGN KEY (post_id, tenant_id)
+        REFERENCES posts(id, tenant_id),
+    FOREIGN KEY (user_id, tenant_id)
+        REFERENCES users(id, tenant_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_clicks_tenant ON clicks(tenant_id);
@@ -214,8 +240,8 @@ SELECT
     pr.affiliate_url,
     t.name AS tenant_name, t.slug AS tenant_slug, t.domain
 FROM posts p
-LEFT JOIN categories c ON p.category_id = c.id
-LEFT JOIN products pr ON p.product_id = pr.id
+LEFT JOIN categories c ON p.category_id = c.id AND p.tenant_id = c.tenant_id
+LEFT JOIN products pr ON p.product_id = pr.id AND p.tenant_id = pr.tenant_id
 JOIN tenants t ON p.tenant_id = t.id;
 
 -- ═══════════════════════════════════════════════════
