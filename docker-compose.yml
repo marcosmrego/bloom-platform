@@ -14,6 +14,11 @@ services:
       - DB_NAME=bloom
       - DB_USER=postgres
       - DB_PASSWORD=${DB_PASSWORD}
+      - CONTENT_API_TOKEN=${CONTENT_API_TOKEN}
+      - CONTENT_AUTOPUBLISH_ENABLED=${CONTENT_AUTOPUBLISH_ENABLED:-false}
+      - MEDIA_ROOT=/data/media
+    volumes:
+      - bloom-media:/data/media
     restart: unless-stopped
 
   bloom-frontend:
@@ -30,3 +35,6 @@ services:
     depends_on:
       - bloom-api
     restart: unless-stopped
+
+volumes:
+  bloom-media:

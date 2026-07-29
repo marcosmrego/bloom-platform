@@ -5,17 +5,24 @@ FastAPI core: tenants, products, posts, categories, users, clicks, campaigns
 import os
 import logging
 import re
+import secrets
+import hashlib
+import json
+import tempfile
+from io import BytesIO
 import unicodedata
 from pathlib import Path
 from contextlib import asynccontextmanager
 
 import psycopg2
 import psycopg2.extras
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Header, UploadFile, File
+from fastapi.staticfiles import StaticFiles
 import asyncio
 from functools import partial
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from PIL import Image, UnidentifiedImageError
 from typing import Optional, List, Dict, Any
 
 # ── Config ────────────────────────────────────────
@@ -35,6 +42,15 @@ DB_CONFIG = {
 }
 
 SLUG_MAX_LENGTH = 100
+CONTENT_API_TOKEN = os.getenv("CONTENT_API_TOKEN", "").strip()
+CONTENT_AUTOPUBLISH_ENABLED = os.getenv(
+    "CONTENT_AUTOPUBLISH_ENABLED", "false"
+).strip().lower() in {"1", "true", "yes", "on"}
+MEDIA_ROOT = Path(
+    os.getenv("MEDIA_ROOT", str(Path(tempfile.gettempdir()) / "bloom-media"))
+).resolve()
+MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", str(10 * 1024 * 1024)))
+MAX_IMAGE_PIXELS = int(os.getenv("MAX_IMAGE_PIXELS", "12000000"))
 
 
 def slugify(value: str, max_length: int = SLUG_MAX_LENGTH) -> str:
@@ -63,6 +79,68 @@ def unique_post_slug(cur, tenant_id: int, value: str) -> str:
         suffix_text = f"-{suffix}"
         candidate = f"{base[:SLUG_MAX_LENGTH - len(suffix_text)].rstrip('-')}{suffix_text}"
         suffix += 1
+
+
+def require_content_token(authorization: Optional[str]) -> None:
+    """Valida o token interno sem revelar se houve correspondência parcial."""
+    if not CONTENT_API_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="Content automation API is not configured",
+        )
+    scheme, separator, supplied = (authorization or "").partition(" ")
+    valid = (
+        separator == " "
+        and scheme.lower() == "bearer"
+        and bool(supplied)
+        and secrets.compare_digest(supplied, CONTENT_API_TOKEN)
+    )
+    if not valid:
+        raise HTTPException(status_code=401, detail="Invalid automation token")
+
+
+def validate_idempotency_key(value: Optional[str]) -> str:
+    key = (value or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}", key):
+        raise HTTPException(
+            status_code=422,
+            detail="Idempotency-Key must contain 8-128 safe characters",
+        )
+    return key
+
+
+def post_request_hash(data: "PostCreate") -> str:
+    payload = json.dumps(
+        data.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def normalize_webp(content: bytes) -> bytes:
+    """Valida uma imagem raster e devolve WebP sem metadados."""
+    try:
+        with Image.open(BytesIO(content)) as source:
+            width, height = source.size
+            if width < 640 or height < 360:
+                raise ValueError("Image dimensions are too small")
+            if width * height > MAX_IMAGE_PIXELS:
+                raise ValueError("Image dimensions are too large")
+            source.load()
+            converted = source.convert("RGB")
+            output = BytesIO()
+            converted.save(
+                output,
+                format="WEBP",
+                quality=84,
+                method=6,
+                exif=b"",
+            )
+            return output.getvalue()
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ValueError("Invalid raster image") from exc
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bloom")
@@ -94,6 +172,9 @@ app = FastAPI(
     description="Plataforma multi-tenant de blogs com IA",
     lifespan=lifespan,
 )
+
+MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
+app.mount("/media", StaticFiles(directory=str(MEDIA_ROOT)), name="media")
 
 app.add_middleware(
     CORSMiddleware,
@@ -173,6 +254,8 @@ class PostCreate(BaseModel):
     pros: Optional[List[str]] = None
     cons: Optional[List[str]] = None
     tags: Optional[List[str]] = None
+    seo_title: Optional[str] = None
+    seo_description: Optional[str] = None
     status: str = "draft"
     created_by: str = "hermes"
 
@@ -353,8 +436,25 @@ async def get_post(tenant_slug: str, slug: str):
     return dict(post)
 
 @app.post("/api/v1/{tenant_slug}/posts")
-async def create_post(tenant_slug: str, data: PostCreate):
-    def _sync(tslug: str, d: PostCreate):
+async def create_post(
+    tenant_slug: str,
+    data: PostCreate,
+    authorization: Optional[str] = Header(default=None),
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+):
+    require_content_token(authorization)
+    safe_key = validate_idempotency_key(idempotency_key)
+    request_hash = post_request_hash(data)
+
+    if data.status not in {"draft", "published"}:
+        raise HTTPException(status_code=422, detail="Unsupported post status")
+    if data.status == "published" and not CONTENT_AUTOPUBLISH_ENABLED:
+        raise HTTPException(
+            status_code=403,
+            detail="Automatic publishing is disabled; create a draft instead",
+        )
+
+    def _sync(tslug: str, d: PostCreate, idem_key: str, payload_hash: str):
         conn = get_db()
         try:
             cur = conn.cursor()
@@ -366,21 +466,64 @@ async def create_post(tenant_slug: str, data: PostCreate):
                 return {"error": "Tenant not found"}, 404
             tenant_id = t["id"]
 
-            # Resolve category_id (opcional)
+            cur.execute(
+                """
+                INSERT INTO content_jobs
+                    (tenant_id, idempotency_key, request_hash, status)
+                VALUES (%s, %s, %s, 'running')
+                ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
+                RETURNING id
+                """,
+                (tenant_id, idem_key, payload_hash),
+            )
+            inserted_job = cur.fetchone()
+            if not inserted_job:
+                cur.execute(
+                    """
+                    SELECT request_hash, status, post_id
+                    FROM content_jobs
+                    WHERE tenant_id = %s AND idempotency_key = %s
+                    FOR UPDATE
+                    """,
+                    (tenant_id, idem_key),
+                )
+                existing_job = cur.fetchone()
+                if existing_job["request_hash"] != payload_hash:
+                    return {
+                        "error": "Idempotency-Key was already used for another payload"
+                    }, 409
+                if existing_job["status"] == "completed":
+                    cur.execute(
+                        "SELECT slug FROM posts WHERE id = %s AND tenant_id = %s",
+                        (existing_job["post_id"], tenant_id),
+                    )
+                    existing_post = cur.fetchone()
+                    conn.commit()
+                    return {
+                        "status": "created",
+                        "id": existing_job["post_id"],
+                        "slug": existing_post["slug"] if existing_post else None,
+                        "replayed": True,
+                    }
+                return {"error": "An execution with this key is already running"}, 409
+
+            # Resolve category_id. Referências informadas devem ser exatas.
             category_id = None
             if d.category_slug:
                 cur.execute("SELECT id FROM categories WHERE tenant_id = %s AND slug = %s", (tenant_id, d.category_slug))
                 cat = cur.fetchone()
-                if cat:
-                    category_id = cat["id"]
+                if not cat:
+                    return {"error": "Category not found for tenant"}, 422
+                category_id = cat["id"]
 
-            # Resolve product_id (opcional)
+            # Resolve product_id. ASIN informado nunca é ignorado silenciosamente.
             product_id = None
             if d.product_asin:
                 cur.execute("SELECT id FROM products WHERE tenant_id = %s AND asin = %s", (tenant_id, d.product_asin))
                 prod = cur.fetchone()
-                if prod:
-                    product_id = prod["id"]
+                if not prod:
+                    return {"error": "Product ASIN not found for tenant"}, 422
+                product_id = prod["id"]
 
             # Normaliza slugs fornecidos e resolve colisões dentro do tenant.
             try:
@@ -391,8 +534,8 @@ async def create_post(tenant_slug: str, data: PostCreate):
             cur.execute("""
                 INSERT INTO posts (tenant_id, title, slug, excerpt, content, image_url,
                     category_id, product_id, rating, pros, cons, status, tags, created_by,
-                    published_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                    seo_title, seo_description, published_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                     CASE WHEN %s = 'published' THEN NOW() ELSE NULL END)
                 RETURNING id
             """, (
@@ -402,27 +545,105 @@ async def create_post(tenant_slug: str, data: PostCreate):
                 psycopg2.extras.Json(d.cons or []),
                 d.status,
                 psycopg2.extras.Json(d.tags or []),
-                d.created_by, d.status,
+                d.created_by, d.seo_title, d.seo_description, d.status,
             ))
             post_id = cur.fetchone()["id"]
+            cur.execute(
+                """
+                UPDATE content_jobs
+                SET status = 'completed', post_id = %s, updated_at = NOW()
+                WHERE tenant_id = %s AND idempotency_key = %s
+                """,
+                (post_id, tenant_id, idem_key),
+            )
             conn.commit()
 
-            return {"status": "created", "id": post_id, "slug": slug}
+            return {
+                "status": "created",
+                "id": post_id,
+                "slug": slug,
+                "replayed": False,
+            }
         except Exception as e:
             conn.rollback()
-            return {"error": str(e)}, 500
+            logger.exception("Content automation failed for tenant=%s", tslug)
+            return {"error": "Internal content automation error"}, 500
         finally:
             conn.close()
 
-    result = await run_db_task(_sync, tenant_slug, data)
+    result = await run_db_task(_sync, tenant_slug, data, safe_key, request_hash)
     # propagate HTTP-like errors
     if isinstance(result, tuple) and result[1] == 404:
         raise HTTPException(status_code=404, detail=result[0].get('error'))
     if isinstance(result, tuple) and result[1] == 422:
         raise HTTPException(status_code=422, detail=result[0].get('error'))
+    if isinstance(result, tuple) and result[1] == 409:
+        raise HTTPException(status_code=409, detail=result[0].get('error'))
     if isinstance(result, tuple) and result[1] == 500:
         raise HTTPException(status_code=500, detail=result[0].get('error'))
     return result
+
+
+@app.post("/api/v1/{tenant_slug}/media")
+async def upload_post_media(
+    tenant_slug: str,
+    image: UploadFile = File(...),
+    authorization: Optional[str] = Header(default=None),
+):
+    """Persiste uma imagem WebP deduplicada para uso pelos posts do tenant."""
+    require_content_token(authorization)
+    if image.content_type not in {
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "application/octet-stream",
+    }:
+        raise HTTPException(status_code=415, detail="Unsupported image type")
+
+    content = await image.read(MAX_IMAGE_BYTES + 1)
+    await image.close()
+    if not content or len(content) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image is empty or too large")
+    try:
+        webp_content = normalize_webp(content)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    def _tenant_exists(tslug: str) -> bool:
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT 1 FROM tenants WHERE slug = %s AND status = 'active'",
+                (tslug,),
+            )
+            return bool(cur.fetchone())
+        finally:
+            conn.close()
+
+    if not await run_db_task(_tenant_exists, tenant_slug):
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    digest = hashlib.sha256(webp_content).hexdigest()
+    tenant_dir = MEDIA_ROOT / tenant_slug
+    tenant_dir.mkdir(parents=True, exist_ok=True)
+    final_path = tenant_dir / f"{digest}.webp"
+    if not final_path.exists():
+        temporary_path = tenant_dir / (
+            f".{digest}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+        )
+        temporary_path.write_bytes(webp_content)
+        try:
+            temporary_path.replace(final_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+
+    return {
+        "status": "stored",
+        "sha256": digest,
+        "image_url": f"/media/{tenant_slug}/{digest}.webp",
+        "bytes": len(webp_content),
+    }
 
 # ── CLICKS ─────────────────────────────────────────
 @app.post("/api/v1/{tenant_slug}/clicks")
