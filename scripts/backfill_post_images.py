@@ -12,15 +12,13 @@ IMAGE_BASE = "https://image.pollinations.ai/prompt/"
 
 
 def build_image_url(tenant_slug: str, post_id: int, title: str, category_slug: str | None) -> str:
+    if tenant_slug == "mundonoprato":
+        return f"/images/posts/mundonoprato/post-{post_id}.webp"
+
     if tenant_slug == "viralbarato":
         prompt = (
             f"professional ecommerce product photography, {title}, "
             "single product, clean neutral background, realistic, no text, no logo"
-        )
-    else:
-        prompt = (
-            f"professional editorial food photography, {title}, "
-            f"{category_slug or 'gastronomy'}, realistic, warm natural light, no text, no logo"
         )
     seed_source = f"{tenant_slug}:{post_id}:{title}".encode("utf-8")
     seed = int(hashlib.sha256(seed_source).hexdigest()[:8], 16)
@@ -33,15 +31,6 @@ def build_image_url(tenant_slug: str, post_id: int, title: str, category_slug: s
 def find_targets(cur):
     cur.execute(
         """
-        WITH duplicate_mundo_images AS (
-            SELECT p.image_url
-            FROM posts p
-            JOIN tenants t ON t.id = p.tenant_id
-            WHERE t.slug = 'mundonoprato'
-              AND NULLIF(BTRIM(p.image_url), '') IS NOT NULL
-            GROUP BY p.image_url
-            HAVING COUNT(*) > 1
-        )
         SELECT t.slug, p.id, p.title, c.slug, p.image_url
         FROM posts p
         JOIN tenants t ON t.id = p.tenant_id
@@ -52,7 +41,7 @@ def find_targets(cur):
             AND NULLIF(BTRIM(p.image_url), '') IS NULL
         ) OR (
             t.slug = 'mundonoprato'
-            AND p.image_url IN (SELECT image_url FROM duplicate_mundo_images)
+            AND p.image_url !~ '^/images/posts/mundonoprato/post-[0-9]+[.]webp$'
         )
         ORDER BY t.slug, p.id
         """
@@ -73,7 +62,7 @@ def main():
             targets = find_targets(cur)
             for tenant_slug, post_id, title, category_slug, old_url in targets:
                 new_url = build_image_url(tenant_slug, post_id, title, category_slug)
-                action = "missing" if not old_url else "duplicate"
+                action = "missing" if not old_url else "replace"
                 print(f"{tenant_slug} post={post_id} ({action}): {new_url}")
                 if args.apply:
                     cur.execute(
