@@ -2,6 +2,10 @@
 import { getCategories, getPosts } from '../../lib/api';
 import { getTenantFromHost } from '../../lib/tenant';
 import { getPostImage, getSiteConfig } from '../../lib/site';
+import SeoHead from '../../components/SeoHead.astro';
+import MonetizationHead from '../../components/MonetizationHead.astro';
+import MonetizationBody from '../../components/MonetizationBody.astro';
+import SiteFooter from '../../components/SiteFooter.astro';
 
 const TENANT = getTenantFromHost(Astro.url.hostname);
 const { slug } = Astro.params;
@@ -10,6 +14,16 @@ const categories = await getCategories(TENANT);
 const config = getSiteConfig(TENANT);
 const category = categories.find(item => item.slug === slug);
 const displayName = category?.name || posts[0]?.category_name || slug;
+const pageTitle = `${displayName} — ${config.name}`;
+const pageDescription = `${config.contentLabelPlural} de ${displayName?.toLowerCase()} em ${config.name}.`;
+const categoryJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'CollectionPage',
+  name: pageTitle,
+  description: pageDescription,
+  url: `https://${config.domain}/categoria/${encodeURIComponent(slug!)}`,
+  isPartOf: { '@type': 'WebSite', name: config.name, url: `https://${config.domain}/` },
+};
 ---
 
 <!doctype html>
@@ -17,8 +31,8 @@ const displayName = category?.name || posts[0]?.category_name || slug;
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>{displayName} — {config.name}</title>
-  <meta name="description" content={`${config.contentLabelPlural} de ${displayName?.toLowerCase()} em ${config.name}.`} />
+  <SeoHead config={config} title={pageTitle} description={pageDescription} path={`/categoria/${encodeURIComponent(slug!)}`} jsonLd={categoryJsonLd} />
+  <MonetizationHead />
   <style define:vars={{ siteAccent: config.accent }}>
     :root { --accent: var(--siteAccent); --bg: #f8f9fa; --card: #fff; --text: #212529; --muted: #6c757d; --border: #dee2e6; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -40,6 +54,7 @@ const displayName = category?.name || posts[0]?.category_name || slug;
   </style>
 </head>
 <body>
+  <MonetizationBody />
   <header><div class="container"><a href="/">← {config.name}</a> / <strong>{displayName}</strong></div></header>
   <main class="container">
     <h2 style="margin-bottom:1.5rem">{displayName} ({posts.length} {posts.length === 1 ? config.contentLabel : config.contentLabelPlural})</h2>
@@ -59,5 +74,6 @@ const displayName = category?.name || posts[0]?.category_name || slug;
       ))}
     </div>
   </main>
+  <SiteFooter config={config} />
 </body>
 </html>

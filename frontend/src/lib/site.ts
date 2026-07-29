@@ -1,4 +1,6 @@
 export interface SiteConfig {
+  slug: string;
+  domain: string;
   name: string;
   title: string;
   description: string;
@@ -14,6 +16,8 @@ export interface SiteConfig {
 
 const sites: Record<string, SiteConfig> = {
   viralbarato: {
+    slug: 'viralbarato',
+    domain: 'viralbarato.com.br',
     name: 'ViralBarato',
     title: 'ViralBarato — Reviews e Menores Preços',
     description: 'Descubra produtos com melhor custo-benefício. Reviews reais e links diretos para comprar.',
@@ -33,6 +37,8 @@ const sites: Record<string, SiteConfig> = {
     },
   },
   mundonoprato: {
+    slug: 'mundonoprato',
+    domain: 'mundonoprato.com.br',
     name: 'Mundo no Prato',
     title: 'Mundo no Prato — Gastronomia Mundial',
     description: 'Receitas, histórias e sabores de todos os cantos do planeta. Do Mediterrâneo à Ásia.',
@@ -68,4 +74,12 @@ export function getPostImage(
     || post.product_image
     || config.categoryPlaceholders[post.category_slug || '']
     || config.placeholderImg;
+}
+
+export function absoluteSiteUrl(config: SiteConfig, path = '/'): string {
+  return new URL(path, `https://${config.domain}`).toString();
+}
+
+export function absoluteImageUrl(config: SiteConfig, image: string): string {
+  return new URL(image, `https://${config.domain}`).toString();
 }

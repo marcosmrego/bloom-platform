@@ -1,0 +1,6 @@
+---
+const adcashBodyCode = process.env.ADCASH_BODY_CODE?.trim();
+---
+
+{adcashBodyCode && <Fragment set:html={adcashBodyCode} />}
+

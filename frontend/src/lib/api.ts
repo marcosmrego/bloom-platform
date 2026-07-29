@@ -22,9 +22,12 @@ export interface Post {
   product_image: string | null;
   affiliate_url: string | null;
   tenant_name?: string;
+  seo_title?: string | null;
+  seo_description?: string | null;
+  updated_at?: string | null;
 }
 
-interface Category {
+export interface Category {
   id: number;
   name: string;
   slug: string;

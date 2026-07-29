@@ -3,6 +3,10 @@ import { marked } from 'marked';
 import { getPost } from '../../lib/api';
 import { getTenantFromHost } from '../../lib/tenant';
 import { getPostImage, getSiteConfig } from '../../lib/site';
+import SeoHead from '../../components/SeoHead.astro';
+import MonetizationHead from '../../components/MonetizationHead.astro';
+import MonetizationBody from '../../components/MonetizationBody.astro';
+import SiteFooter from '../../components/SiteFooter.astro';
 
 const TENANT = getTenantFromHost(Astro.url.hostname);
 const { slug } = Astro.params;
@@ -21,6 +25,21 @@ const stars = post.rating ? '★'.repeat(Math.floor(post.rating)) : '';
 const price = post.price || post.product_price;
 const tenantConfig = getSiteConfig(TENANT);
 const heroImage = getPostImage(tenantConfig, post);
+const seoTitle = post.seo_title || `${post.title} — ${tenantConfig.name}`;
+const seoDescription = post.seo_description || post.excerpt || post.title;
+const articleJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Article',
+  headline: post.title,
+  description: seoDescription,
+  image: new URL(heroImage, `https://${tenantConfig.domain}`).toString(),
+  datePublished: post.published_at,
+  dateModified: post.updated_at || post.published_at,
+  mainEntityOfPage: `https://${tenantConfig.domain}/blog/${encodeURIComponent(post.slug)}`,
+  author: { '@type': 'Organization', name: tenantConfig.name },
+  publisher: { '@type': 'Organization', name: tenantConfig.name },
+  inLanguage: 'pt-BR',
+};
 ---
 
 <!doctype html>
@@ -28,10 +47,8 @@ const heroImage = getPostImage(tenantConfig, post);
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>{post.title} — {tenantConfig.name}</title>
-  <meta name="description" content={post.excerpt || post.title} />
-  <meta property="og:title" content={post.title} />
-  <meta property="og:image" content={heroImage} />
+  <SeoHead config={tenantConfig} title={seoTitle} description={seoDescription} path={`/blog/${encodeURIComponent(post.slug)}`} image={heroImage} type="article" publishedTime={post.published_at} modifiedTime={post.updated_at} jsonLd={articleJsonLd} />
+  <MonetizationHead />
   <style define:vars={{ accent: tenantConfig.accent }}>
     :root { --accent: var(--accent-custom, #e63946); }
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -78,6 +95,7 @@ const heroImage = getPostImage(tenantConfig, post);
   </style>
 </head>
 <body>
+  <MonetizationBody />
   <div class="top-bar">
     <div class="container">
       <a href="/">← {tenantConfig.name}</a>
@@ -133,6 +151,6 @@ const heroImage = getPostImage(tenantConfig, post);
     <a href="/" class="back-link">← Voltar para home</a>
   </main>
 
-  <footer>{tenantConfig.footer}</footer>
+  <SiteFooter config={tenantConfig} />
 </body>
 </html>

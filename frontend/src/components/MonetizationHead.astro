@@ -1,0 +1,15 @@
+---
+const adsenseClient = process.env.ADSENSE_CLIENT_ID?.trim();
+const adcashHeadCode = process.env.ADCASH_HEAD_CODE?.trim();
+const validAdsenseClient = adsenseClient && /^ca-pub-\d+$/.test(adsenseClient);
+---
+
+{validAdsenseClient && (
+  <script
+    async
+    crossorigin="anonymous"
+    src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${adsenseClient}`}
+  ></script>
+)}
+{adcashHeadCode && <Fragment set:html={adcashHeadCode} />}
+

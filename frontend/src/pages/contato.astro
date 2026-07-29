@@ -1,0 +1,13 @@
+---
+import InstitutionalPage from '../components/InstitutionalPage.astro';
+import { getTenantFromHost } from '../lib/tenant';
+import { getSiteConfig } from '../lib/site';
+const config = getSiteConfig(getTenantFromHost(Astro.url.hostname));
+const email = `contato@${config.domain}`;
+---
+<InstitutionalPage title="Contato" description={`Entre em contato com a equipe do ${config.name}.`} path="/contato">
+  <p>Dúvidas, correções, sugestões editoriais e solicitações comerciais podem ser enviadas para:</p>
+  <p><a href={`mailto:${email}`}>{email}</a></p>
+  <p>Ao relatar uma correção, inclua o endereço da página e a informação que precisa ser revisada.</p>
+</InstitutionalPage>
+

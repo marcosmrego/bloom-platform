@@ -2,11 +2,19 @@
 import { getPosts, getCategories } from '../lib/api';
 import { getTenantFromHost } from '../lib/tenant';
 import { getPostImage, getSiteConfig } from '../lib/site';
+import SeoHead from '../components/SeoHead.astro';
+import MonetizationHead from '../components/MonetizationHead.astro';
+import MonetizationBody from '../components/MonetizationBody.astro';
+import SiteFooter from '../components/SiteFooter.astro';
 
 const TENANT = getTenantFromHost(Astro.url.hostname);
 const posts = await getPosts(TENANT);
 const categories = await getCategories(TENANT);
 const config = getSiteConfig(TENANT);
+const websiteJsonLd = [
+  { '@context': 'https://schema.org', '@type': 'WebSite', name: config.name, url: `https://${config.domain}/`, description: config.description, inLanguage: 'pt-BR' },
+  { '@context': 'https://schema.org', '@type': 'Organization', name: config.name, url: `https://${config.domain}/` },
+];
 ---
 
 <!doctype html>
@@ -14,8 +22,8 @@ const config = getSiteConfig(TENANT);
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>{config.title}</title>
-  <meta name="description" content={config.description} />
+  <SeoHead config={config} title={config.title} description={config.description} jsonLd={websiteJsonLd} />
+  <MonetizationHead />
   <style define:vars={{ accent: config.accent }}>
     :root { --accent: var(--accent-custom, #e63946); }
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -45,6 +53,7 @@ const config = getSiteConfig(TENANT);
   </style>
 </head>
 <body>
+  <MonetizationBody />
   <header>
     <div class="container">
       <h1>{config.heading}</h1>
@@ -79,10 +88,6 @@ const config = getSiteConfig(TENANT);
     </div>
   </main>
 
-  <footer>
-    <div class="container">
-      {config.footer}
-    </div>
-  </footer>
+  <SiteFooter config={config} />
 </body>
 </html>

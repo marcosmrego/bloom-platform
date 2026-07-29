@@ -28,11 +28,22 @@ DB_PASSWORD=sua_senha_do_postgres
 BLOOM_API=http://bloom-api:8000
 PORT=3000
 
+# Monetização (valores distintos por instância quando aplicável)
+ADSENSE_CLIENT_ID=ca-pub-SEU_ID
+ADCASH_HEAD_CODE=tag_exata_fornecida_pelo_painel
+ADCASH_BODY_CODE=tag_ou_slot_opcional_fornecido_pelo_painel
+ADS_TXT_EXTRA=linhas_ads_txt_fornecidas_pelas_redes
+
 # Escolha um modo:
 # - Instância multi-domínio: não defina BLOOM_TENANT; o hostname seleciona o site.
 # - Instância dedicada: defina BLOOM_TENANT=viralbarato ou BLOOM_TENANT=mundonoprato.
 #
 # Nunca publique a mesma instância para os dois domínios com BLOOM_TENANT definido.
+#
+# Depois de configurar o AdSense:
+# - Ative Auto ads no painel.
+# - Publique a mensagem de consentimento em Privacy & messaging.
+# - Valide /ads.txt em cada domínio.
 
 ## Ordem de migração de uma instalação existente
 ## ───────────────────────────────────────────────────

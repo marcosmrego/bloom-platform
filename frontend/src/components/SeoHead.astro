@@ -1,0 +1,59 @@
+---
+import type { SiteConfig } from '../lib/site';
+import { absoluteImageUrl, absoluteSiteUrl } from '../lib/site';
+
+interface Props {
+  config: SiteConfig;
+  title: string;
+  description: string;
+  path?: string;
+  image?: string;
+  type?: 'website' | 'article';
+  publishedTime?: string | null;
+  modifiedTime?: string | null;
+  jsonLd?: Record<string, unknown> | Array<Record<string, unknown>>;
+  noindex?: boolean;
+}
+
+const {
+  config,
+  title,
+  description,
+  path = '/',
+  image = config.placeholderImg,
+  type = 'website',
+  publishedTime,
+  modifiedTime,
+  jsonLd,
+  noindex = false,
+} = Astro.props;
+
+const canonical = absoluteSiteUrl(config, path);
+const socialImage = absoluteImageUrl(config, image);
+const cleanDescription = description.replace(/\s+/g, ' ').trim().slice(0, 160);
+---
+
+<title>{title}</title>
+<meta name="description" content={cleanDescription} />
+<link rel="canonical" href={canonical} />
+<meta name="robots" content={noindex ? 'noindex,follow' : 'index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1'} />
+
+<meta property="og:locale" content="pt_BR" />
+<meta property="og:type" content={type} />
+<meta property="og:site_name" content={config.name} />
+<meta property="og:title" content={title} />
+<meta property="og:description" content={cleanDescription} />
+<meta property="og:url" content={canonical} />
+<meta property="og:image" content={socialImage} />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content={title} />
+<meta name="twitter:description" content={cleanDescription} />
+<meta name="twitter:image" content={socialImage} />
+
+{type === 'article' && publishedTime && <meta property="article:published_time" content={publishedTime} />}
+{type === 'article' && modifiedTime && <meta property="article:modified_time" content={modifiedTime} />}
+{jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
+

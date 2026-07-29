@@ -1,0 +1,14 @@
+---
+import InstitutionalPage from '../components/InstitutionalPage.astro';
+import { getTenantFromHost } from '../lib/tenant';
+import { getSiteConfig } from '../lib/site';
+const config = getSiteConfig(getTenantFromHost(Astro.url.hostname));
+---
+<InstitutionalPage title={`Sobre o ${config.name}`} description={`Conheça a proposta editorial, os critérios e a transparência do ${config.name}.`} path="/sobre">
+  <p>O {config.name} é uma publicação independente criada para oferecer conteúdo útil, claro e atualizado em português.</p>
+  <h2>Como produzimos conteúdo</h2>
+  <p>Escolhemos temas relevantes para nossos leitores, pesquisamos informações públicas e organizamos cada material com foco em utilidade prática. Conteúdos podem ser revisados e atualizados quando surgem informações novas.</p>
+  <h2>Transparência comercial</h2>
+  <p>O site pode exibir publicidade e utilizar links de afiliados. Uma eventual comissão não altera o preço pago pelo leitor e ajuda a financiar a operação editorial.</p>
+</InstitutionalPage>
+
