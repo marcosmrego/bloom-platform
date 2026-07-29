@@ -93,7 +93,8 @@ SELECT
     c.name AS category_name, c.slug AS category_slug,
     pr.asin, pr.title AS product_title, pr.price, pr.image_url AS product_image,
     pr.affiliate_url,
-    t.name AS tenant_name, t.slug AS tenant_slug, t.domain
+    t.name AS tenant_name, t.slug AS tenant_slug, t.domain,
+    p.seo_title, p.seo_description, p.created_at, p.updated_at
 FROM posts p
 LEFT JOIN categories c ON p.category_id = c.id AND p.tenant_id = c.tenant_id
 LEFT JOIN products pr ON p.product_id = pr.id AND p.tenant_id = pr.tenant_id
