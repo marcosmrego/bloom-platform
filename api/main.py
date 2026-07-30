@@ -228,8 +228,8 @@ EDITORIAL_STOPWORDS = {
 }
 PLACEHOLDER_PATTERNS = (
     r"\blorem ipsum\b",
-    r"\bTODO\b",
-    r"\bTBD\b",
+    r"\b(?-i:TODO)\b",
+    r"\b(?-i:TBD)\b",
     r"\[(?:inserir|preencher|imagem|fonte|link)[^\]]*\]",
     r"\{\{[^}]+\}\}",
 )

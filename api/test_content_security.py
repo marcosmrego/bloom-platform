@@ -269,6 +269,18 @@ class EditorialStructureGateTests(unittest.TestCase):
                     validate_editorial_structure(post, "mundonoprato")
         self.assertEqual(raised.exception.status_code, 422)
 
+    def test_accepts_portuguese_word_todo_as_regular_content(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            media_root = Path(temp_dir)
+            image = media_root / "mundonoprato" / "article.webp"
+            image.parent.mkdir()
+            image.write_bytes(b"RIFF-test-WEBP")
+            post = self.valid_post("/media/mundonoprato/article.webp")
+            post.content += "\n\nO guia vale para todo o processo de organização."
+            with patch.object(main, "MEDIA_ROOT", media_root):
+                result = validate_editorial_structure(post, "mundonoprato")
+        self.assertTrue(result["placeholders_absent"])
+
 
 if __name__ == "__main__":
     unittest.main()
