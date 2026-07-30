@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 from io import BytesIO
 from unittest.mock import patch
 
@@ -9,9 +11,12 @@ import main
 from main import (
     PostCreate,
     SourceEvidence,
+    editorial_similarity,
+    find_similar_topic,
     normalize_webp,
     post_request_hash,
     validate_editorial_sources,
+    validate_editorial_structure,
     validate_idempotency_key,
 )
 
@@ -180,6 +185,89 @@ class EditorialSourceGateTests(unittest.TestCase):
         result = validate_editorial_sources(health_post)
         self.assertTrue(result["primary_source_required"])
         self.assertTrue(result["primary_source_present"])
+
+
+class SimilarityGateTests(unittest.TestCase):
+    def test_detects_near_duplicate_topic(self):
+        candidates = [
+            {
+                "id": 7,
+                "title": "Como escolher a melhor panela de pressão",
+                "slug": "escolher-melhor-panela-pressao",
+                "status": "published",
+            }
+        ]
+        match = find_similar_topic(
+            "Como escolher a melhor panela de pressão para sua cozinha",
+            candidates,
+        )
+        self.assertIsNotNone(match)
+        self.assertEqual(match["id"], 7)
+
+    def test_allows_distinct_topic(self):
+        match = find_similar_topic(
+            "Temperos frescos para cultivar na janela",
+            [{"id": 1, "title": "Guia de panelas de ferro", "slug": "panelas"}],
+        )
+        self.assertIsNone(match)
+
+    def test_similarity_is_accent_insensitive(self):
+        scores = editorial_similarity(
+            "Alimentação saudável com sódio reduzido",
+            "Alimentacao saudavel com sodio reduzido",
+        )
+        self.assertEqual(scores["jaccard"], 1.0)
+
+
+class EditorialStructureGateTests(unittest.TestCase):
+    def valid_post(self, image_url):
+        paragraph = " ".join(
+            ["Conteúdo editorial original com informação útil ao leitor."] * 45
+        )
+        return PostCreate(
+            tenant_slug="mundonoprato",
+            title="Como organizar os utensílios de uma cozinha pequena",
+            excerpt=(
+                "Um guia prático para aproveitar melhor o espaço e manter os "
+                "utensílios acessíveis no cotidiano."
+            ),
+            content=f"Introdução prática.\n\n## Planejamento\n\n{paragraph}\n\n## Organização\n\n{paragraph}",
+            image_url=image_url,
+            category_slug="cozinha",
+            seo_title="Como organizar utensílios em cozinhas pequenas",
+            seo_description=(
+                "Aprenda a organizar utensílios em uma cozinha pequena com "
+                "soluções práticas para aproveitar o espaço e facilitar a rotina."
+            ),
+            sources=[
+                source("https://example.org/guia"),
+                source("https://example.net/manual"),
+            ],
+        )
+
+    def test_accepts_complete_structure_and_persisted_webp(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            media_root = Path(temp_dir)
+            image = media_root / "mundonoprato" / "article.webp"
+            image.parent.mkdir()
+            image.write_bytes(b"RIFF-test-WEBP")
+            with patch.object(main, "MEDIA_ROOT", media_root):
+                result = validate_editorial_structure(
+                    self.valid_post("/media/mundonoprato/article.webp"),
+                    "mundonoprato",
+                )
+        self.assertTrue(result["structure_valid"])
+        self.assertGreaterEqual(result["word_count"], 180)
+
+    def test_rejects_placeholder_or_missing_image(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            media_root = Path(temp_dir)
+            post = self.valid_post("/media/mundonoprato/missing.webp")
+            post.content += "\n\nTODO"
+            with patch.object(main, "MEDIA_ROOT", media_root):
+                with self.assertRaises(HTTPException) as raised:
+                    validate_editorial_structure(post, "mundonoprato")
+        self.assertEqual(raised.exception.status_code, 422)
 
 
 if __name__ == "__main__":

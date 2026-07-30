@@ -8,5 +8,6 @@ requires_env:
   - BLOOM_CONTENT_API_TOKEN
 provides_tools:
   - bloom_context
+  - bloom_check_topic
   - bloom_upload_media
   - bloom_create_draft

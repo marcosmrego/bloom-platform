@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -125,6 +126,26 @@ def _handle_upload_media(args: dict, **_kwargs) -> str:
         return tool_error(f"Bloom media upload failed: {exc}")
 
 
+def _handle_check_topic(args: dict, **_kwargs) -> str:
+    try:
+        tenant = _tenant(args.get("tenant"))
+        topic = str(args.get("topic") or "").strip()
+        if len(topic) < 10 or len(topic) > 200:
+            raise ValueError("topic must contain 10-200 characters")
+        base_url, _token = _config()
+        response = requests.post(
+            f"{base_url}/api/v1/{tenant}/editorial/similarity",
+            headers=_headers(),
+            json={"topic": topic},
+            timeout=TIMEOUT,
+        )
+        payload = _json_response(response)
+        payload["success"] = True
+        return tool_result(payload)
+    except Exception as exc:
+        return tool_error(f"Bloom topic similarity check failed: {exc}")
+
+
 def _handle_create_draft(args: dict, **_kwargs) -> str:
     try:
         tenant = _tenant(args.get("tenant"))
@@ -143,6 +164,10 @@ def _handle_create_draft(args: dict, **_kwargs) -> str:
             raise ValueError("post.title is required")
         if not str(payload.get("content") or "").strip():
             raise ValueError("post.content is required")
+        if len(str(payload.get("content") or "").strip()) < 1000:
+            raise ValueError("post.content must contain at least 1000 characters")
+        if len(re.findall(r"(?m)^##\s+\S", str(payload.get("content") or ""))) < 2:
+            raise ValueError("post.content must contain at least two H2 sections")
         sources = payload.get("sources")
         if not isinstance(sources, list) or len(sources) < 2:
             raise ValueError("post.sources must contain at least two extracted sources")
@@ -208,6 +233,19 @@ BLOOM_UPLOAD_MEDIA_SCHEMA = {
             "path": {"type": "string"},
         },
         "required": ["tenant", "path"],
+    },
+}
+
+BLOOM_CHECK_TOPIC_SCHEMA = {
+    "name": "bloom_check_topic",
+    "description": "Check a proposed topic against existing Bloom drafts and posts before research and generation.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tenant": {"type": "string", "enum": sorted(ALLOWED_TENANTS)},
+            "topic": {"type": "string", "minLength": 10, "maxLength": 200},
+        },
+        "required": ["tenant", "topic"],
     },
 }
 
@@ -285,6 +323,7 @@ BLOOM_CREATE_DRAFT_SCHEMA = {
 def register(ctx) -> None:
     for name, schema, handler in (
         ("bloom_context", BLOOM_CONTEXT_SCHEMA, _handle_context),
+        ("bloom_check_topic", BLOOM_CHECK_TOPIC_SCHEMA, _handle_check_topic),
         ("bloom_upload_media", BLOOM_UPLOAD_MEDIA_SCHEMA, _handle_upload_media),
         ("bloom_create_draft", BLOOM_CREATE_DRAFT_SCHEMA, _handle_create_draft),
     ):

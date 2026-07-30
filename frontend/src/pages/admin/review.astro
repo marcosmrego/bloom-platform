@@ -279,6 +279,11 @@ export const prerender = false;
               <strong>${gates.primary_source_required
                 ? (gates.primary_source_present ? '✓ Fonte primária presente' : '✕ Fonte primária ausente')
                 : '— Fonte primária não exigida'}</strong>
+              <strong>${gates.similarity_valid ? '✓ Pauta sem duplicidade' : '— Similaridade não registrada'}</strong>
+              <strong>${gates.structure_valid
+                ? `✓ Estrutura (${escapeHtml(gates.word_count)} palavras, ${escapeHtml(gates.h2_count)} seções)`
+                : '— Estrutura não registrada'}</strong>
+              <strong>${gates.image_webp_persisted ? '✓ Imagem WebP persistida' : '— Imagem não validada'}</strong>
             </div>
             ${sources.length ? sources.map((source: any) => `
               <article>

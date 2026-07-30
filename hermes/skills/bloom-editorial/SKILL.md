@@ -5,7 +5,8 @@ Crie no máximo um draft editorial por execução para o tenant solicitado.
 ## Fluxo obrigatório
 
 1. Chame `bloom_context` antes de escolher a pauta.
-2. Rejeite pautas iguais ou muito próximas dos posts retornados.
+2. Depois de propor a pauta, chame `bloom_check_topic` antes de pesquisar ou
+   gerar o artigo. Se `similar=true`, rejeite a pauta e escolha outra.
 3. Pesquise fontes atuais e confiáveis. Pelo menos duas páginas devem ter o
    conteúdo efetivamente extraído e lido. Resultados, snippets e URLs retornados
    apenas pelo buscador não contam como fonte consultada.

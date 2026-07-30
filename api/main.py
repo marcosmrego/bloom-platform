@@ -9,6 +9,7 @@ import secrets
 import hashlib
 import json
 import tempfile
+from difflib import SequenceMatcher
 from io import BytesIO
 import unicodedata
 from pathlib import Path
@@ -221,6 +222,126 @@ def validate_editorial_sources(data: "PostCreate") -> Dict[str, Any]:
     }
 
 
+EDITORIAL_STOPWORDS = {
+    "ainda", "alguns", "como", "com", "das", "dos", "entre", "mais",
+    "para", "pela", "pelo", "porque", "qual", "quais", "sobre", "uma",
+}
+PLACEHOLDER_PATTERNS = (
+    r"\blorem ipsum\b",
+    r"\bTODO\b",
+    r"\bTBD\b",
+    r"\[(?:inserir|preencher|imagem|fonte|link)[^\]]*\]",
+    r"\{\{[^}]+\}\}",
+)
+
+
+def _editorial_tokens(value: str) -> set[str]:
+    normalized = unicodedata.normalize("NFKD", value).encode(
+        "ascii", "ignore"
+    ).decode("ascii").lower()
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", normalized)
+        if len(token) >= 3 and token not in EDITORIAL_STOPWORDS
+    }
+
+
+def editorial_similarity(left: str, right: str) -> Dict[str, float]:
+    left_normalized = " ".join(sorted(_editorial_tokens(left)))
+    right_normalized = " ".join(sorted(_editorial_tokens(right)))
+    left_tokens = set(left_normalized.split())
+    right_tokens = set(right_normalized.split())
+    union = left_tokens | right_tokens
+    jaccard = len(left_tokens & right_tokens) / len(union) if union else 0.0
+    sequence = (
+        SequenceMatcher(None, left_normalized, right_normalized).ratio()
+        if left_normalized and right_normalized
+        else 0.0
+    )
+    return {"jaccard": round(jaccard, 4), "sequence": round(sequence, 4)}
+
+
+def find_similar_topic(
+    topic: str, candidates: List[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    closest = None
+    for candidate in candidates:
+        scores = editorial_similarity(topic, candidate.get("title") or "")
+        is_similar = scores["jaccard"] >= 0.65 or scores["sequence"] >= 0.84
+        if is_similar and (
+            closest is None
+            or max(scores.values()) > max(closest["scores"].values())
+        ):
+            closest = {
+                "id": candidate.get("id"),
+                "title": candidate.get("title"),
+                "slug": candidate.get("slug"),
+                "status": candidate.get("status"),
+                "scores": scores,
+            }
+    return closest
+
+
+def validate_editorial_structure(
+    data: "PostCreate", tenant_slug: str
+) -> Dict[str, Any]:
+    title = data.title.strip()
+    excerpt = (data.excerpt or "").strip()
+    content = data.content.strip()
+    seo_title = (data.seo_title or "").strip()
+    seo_description = (data.seo_description or "").strip()
+    word_count = len(re.findall(r"\b[\wÀ-ÿ'-]+\b", content))
+    h2_count = len(re.findall(r"(?m)^##\s+\S", content))
+
+    checks = (
+        (20 <= len(title) <= 120, "Title must contain 20-120 characters"),
+        (80 <= len(excerpt) <= 320, "Excerpt must contain 80-320 characters"),
+        (len(content) >= 1000, "Content must contain at least 1000 characters"),
+        (word_count >= 180, "Content must contain at least 180 words"),
+        (h2_count >= 2, "Content must contain at least two H2 sections"),
+        (20 <= len(seo_title) <= 70, "SEO title must contain 20-70 characters"),
+        (
+            80 <= len(seo_description) <= 170,
+            "SEO description must contain 80-170 characters",
+        ),
+        (bool(data.category_slug), "Category is required"),
+        (bool(data.image_url), "Image is required"),
+    )
+    for passed, detail in checks:
+        if not passed:
+            raise HTTPException(status_code=422, detail=detail)
+
+    if any(re.search(pattern, content, re.IGNORECASE) for pattern in PLACEHOLDER_PATTERNS):
+        raise HTTPException(
+            status_code=422,
+            detail="Content contains placeholders or unfinished text",
+        )
+
+    expected_prefix = f"/media/{tenant_slug}/"
+    image_url = str(data.image_url)
+    if not image_url.startswith(expected_prefix) or not image_url.endswith(".webp"):
+        raise HTTPException(
+            status_code=422,
+            detail="Image must be a tenant-owned Bloom WebP",
+        )
+    relative_path = image_url.removeprefix("/media/")
+    image_path = (MEDIA_ROOT / relative_path).resolve()
+    tenant_media_root = (MEDIA_ROOT / tenant_slug).resolve()
+    if tenant_media_root not in image_path.parents or not image_path.is_file():
+        raise HTTPException(
+            status_code=422,
+            detail="Image is not persisted in Bloom media storage",
+        )
+
+    return {
+        "structure_valid": True,
+        "word_count": word_count,
+        "h2_count": h2_count,
+        "placeholders_absent": True,
+        "image_webp_persisted": True,
+    }
+
+
 def normalize_webp(content: bytes) -> bytes:
     """Valida uma imagem raster e devolve WebP sem metadados."""
     try:
@@ -350,6 +471,10 @@ class SourceEvidence(BaseModel):
     extracted_at: str
     evidence: List[str]
     source_type: Literal["official", "primary", "secondary"]
+
+
+class TopicSimilarityCheck(BaseModel):
+    topic: str
 
 
 class PostCreate(BaseModel):
@@ -569,6 +694,50 @@ async def get_post(tenant_slug: str, slug: str):
         raise HTTPException(status_code=404, detail="Post not found")
     return dict(post)
 
+
+@app.post("/api/v1/{tenant_slug}/editorial/similarity")
+async def check_topic_similarity(
+    tenant_slug: str,
+    data: TopicSimilarityCheck,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_content_token(authorization)
+    topic = data.topic.strip()
+    if len(topic) < 10 or len(topic) > 200:
+        raise HTTPException(
+            status_code=422,
+            detail="Topic must contain 10-200 characters",
+        )
+
+    def _sync(tslug: str, proposed_topic: str):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT p.id, p.title, p.slug, p.status
+                FROM posts p
+                JOIN tenants t ON t.id = p.tenant_id
+                WHERE t.slug = %s
+                  AND p.status IN ('draft', 'published', 'archived')
+                ORDER BY p.updated_at DESC
+                LIMIT 500
+                """,
+                (tslug,),
+            )
+            candidates = [dict(row) for row in cur.fetchall()]
+            return find_similar_topic(proposed_topic, candidates), len(candidates)
+        finally:
+            conn.close()
+
+    match, checked_count = await run_db_task(_sync, tenant_slug, topic)
+    return {
+        "similar": match is not None,
+        "match": match,
+        "checked_count": checked_count,
+    }
+
+
 @app.post("/api/v1/{tenant_slug}/posts")
 async def create_post(
     tenant_slug: str,
@@ -578,7 +747,10 @@ async def create_post(
 ):
     require_content_token(authorization)
     safe_key = validate_idempotency_key(idempotency_key)
-    quality_gates = validate_editorial_sources(data)
+    quality_gates = {
+        **validate_editorial_sources(data),
+        **validate_editorial_structure(data, tenant_slug),
+    }
     request_hash = post_request_hash(data)
 
     if data.status not in {"draft", "published"}:
@@ -606,6 +778,29 @@ async def create_post(
             if not t:
                 return {"error": "Tenant not found"}, 404
             tenant_id = t["id"]
+
+            cur.execute(
+                """
+                SELECT id, title, slug, status
+                FROM posts
+                WHERE tenant_id = %s
+                  AND status IN ('draft', 'published', 'archived')
+                ORDER BY updated_at DESC
+                LIMIT 500
+                """,
+                (tenant_id,),
+            )
+            similar = find_similar_topic(d.title, [dict(row) for row in cur.fetchall()])
+            if similar:
+                return {
+                    "error": "Topic is too similar to existing content",
+                    "match": similar,
+                }, 422
+            gates["similarity_valid"] = True
+            gates["similarity_thresholds"] = {
+                "jaccard": 0.65,
+                "sequence": 0.84,
+            }
 
             cur.execute(
                 """
