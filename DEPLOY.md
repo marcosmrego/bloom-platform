@@ -16,6 +16,8 @@ DB_PORT=5432
 DB_NAME=bloom
 DB_USER=postgres
 DB_PASSWORD=sua_senha_do_postgres
+CONTENT_API_TOKEN=token_exclusivo_da_automacao
+REVIEW_API_TOKEN=token_exclusivo_da_revisao_humana
 
 ## App 2: bloom-frontend
 ## ─────────────────────
@@ -27,6 +29,9 @@ DB_PASSWORD=sua_senha_do_postgres
 # Env vars:
 BLOOM_API=http://bloom-api:8000
 PORT=3000
+REVIEW_API_TOKEN=mesmo_token_exclusivo_da_revisao_humana
+EDITORIAL_REVIEW_USER=editor
+EDITORIAL_REVIEW_PASSWORD=senha_forte_exclusiva_do_painel
 
 # Monetização (valores distintos por instância quando aplicável)
 ADSENSE_CLIENT_ID=ca-pub-SEU_ID
@@ -63,3 +68,12 @@ ADS_TXT_EXTRA=linhas_ads_txt_fornecidas_pelas_redes
 ## ──────────────
 # CNAME viralbarato.com.br → (IP do Coolify)
 # CNAME mundonoprato.com.br → (IP do Coolify)
+
+## Painel de revisão editorial
+## ───────────────────────────
+# 1. Execute:
+#    python scripts/apply_editorial_review_migration.py
+# 2. Configure REVIEW_API_TOKEN com o mesmo valor na API e no frontend.
+# 3. Configure EDITORIAL_REVIEW_USER e EDITORIAL_REVIEW_PASSWORD no frontend.
+# 4. Acesse /admin/review e valide autenticação, edição e decisão.
+# 5. Nunca compartilhe REVIEW_API_TOKEN com o Hermes.

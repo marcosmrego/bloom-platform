@@ -43,6 +43,7 @@ DB_CONFIG = {
 
 SLUG_MAX_LENGTH = 100
 CONTENT_API_TOKEN = os.getenv("CONTENT_API_TOKEN", "").strip()
+REVIEW_API_TOKEN = os.getenv("REVIEW_API_TOKEN", "").strip()
 CONTENT_AUTOPUBLISH_ENABLED = os.getenv(
     "CONTENT_AUTOPUBLISH_ENABLED", "false"
 ).strip().lower() in {"1", "true", "yes", "on"}
@@ -97,6 +98,24 @@ def require_content_token(authorization: Optional[str]) -> None:
     )
     if not valid:
         raise HTTPException(status_code=401, detail="Invalid automation token")
+
+
+def require_review_token(authorization: Optional[str]) -> None:
+    """Authenticate human editorial review with a separate credential."""
+    if not REVIEW_API_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="Editorial review API is not configured",
+        )
+    scheme, separator, supplied = (authorization or "").partition(" ")
+    valid = (
+        separator == " "
+        and scheme.lower() == "bearer"
+        and bool(supplied)
+        and secrets.compare_digest(supplied, REVIEW_API_TOKEN)
+    )
+    if not valid:
+        raise HTTPException(status_code=401, detail="Invalid review token")
 
 
 def validate_idempotency_key(value: Optional[str]) -> str:
@@ -258,6 +277,28 @@ class PostCreate(BaseModel):
     seo_description: Optional[str] = None
     status: str = "draft"
     created_by: str = "hermes"
+
+
+class PostReviewUpdate(BaseModel):
+    title: Optional[str] = None
+    excerpt: Optional[str] = None
+    content: Optional[str] = None
+    image_url: Optional[str] = None
+    category_slug: Optional[str] = None
+    product_asin: Optional[str] = None
+    rating: Optional[float] = None
+    pros: Optional[List[str]] = None
+    cons: Optional[List[str]] = None
+    tags: Optional[List[str]] = None
+    seo_title: Optional[str] = None
+    seo_description: Optional[str] = None
+
+
+class PostReviewDecision(BaseModel):
+    decision: str
+    reviewer: str = "editor"
+    note: Optional[str] = None
+
 
 class PaginatedResponse(BaseModel):
     items: List[Any]
@@ -581,6 +622,341 @@ async def create_post(
         raise HTTPException(status_code=409, detail=result[0].get('error'))
     if isinstance(result, tuple) and result[1] == 500:
         raise HTTPException(status_code=500, detail=result[0].get('error'))
+    return result
+
+
+def _review_post_query() -> str:
+    return """
+        SELECT
+            p.id, p.tenant_id, t.slug AS tenant_slug, t.name AS tenant_name,
+            p.title, p.slug, p.excerpt, p.content, p.image_url,
+            c.slug AS category_slug, c.name AS category_name,
+            pr.asin AS product_asin, pr.title AS product_title,
+            p.rating, p.pros, p.cons, p.tags, p.seo_title,
+            p.seo_description, p.status, p.created_by, p.created_at,
+            p.updated_at, p.published_at
+        FROM posts p
+        JOIN tenants t ON t.id = p.tenant_id
+        LEFT JOIN categories c
+          ON c.id = p.category_id AND c.tenant_id = p.tenant_id
+        LEFT JOIN products pr
+          ON pr.id = p.product_id AND pr.tenant_id = p.tenant_id
+    """
+
+
+@app.get("/api/v1/editorial/review/posts")
+async def list_review_posts(
+    tenant_slug: Optional[str] = None,
+    status: str = "draft",
+    page: int = 1,
+    page_size: int = 30,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_review_token(authorization)
+    if status not in {"draft", "published", "archived"}:
+        raise HTTPException(status_code=422, detail="Unsupported post status")
+    if page < 1 or page_size < 1 or page_size > 100:
+        raise HTTPException(status_code=422, detail="Invalid pagination")
+
+    def _sync(
+        tenant_filter: Optional[str],
+        status_filter: str,
+        page_q: int,
+        page_size_q: int,
+    ):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            conditions = ["p.status = %s"]
+            params: List[Any] = [status_filter]
+            if tenant_filter:
+                conditions.append("t.slug = %s")
+                params.append(tenant_filter)
+            where = " AND ".join(conditions)
+            cur.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM posts p
+                JOIN tenants t ON t.id = p.tenant_id
+                WHERE {where}
+                """,
+                params,
+            )
+            total = cur.fetchone()["total"]
+            offset = (page_q - 1) * page_size_q
+            cur.execute(
+                _review_post_query()
+                + f"""
+                WHERE {where}
+                ORDER BY p.updated_at DESC, p.id DESC
+                LIMIT %s OFFSET %s
+                """,
+                params + [page_size_q, offset],
+            )
+            return {
+                "items": [dict(row) for row in cur.fetchall()],
+                "total": total,
+                "page": page_q,
+                "page_size": page_size_q,
+            }
+        finally:
+            conn.close()
+
+    return await run_db_task(
+        _sync, tenant_slug, status, page, page_size
+    )
+
+
+@app.get("/api/v1/editorial/review/posts/{post_id}")
+async def get_review_post(
+    post_id: int,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_review_token(authorization)
+
+    def _sync(target_id: int):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                _review_post_query() + " WHERE p.id = %s",
+                (target_id,),
+            )
+            post = cur.fetchone()
+            if not post:
+                return None
+            cur.execute(
+                """
+                SELECT action, reviewer, note, created_at
+                FROM post_reviews
+                WHERE post_id = %s
+                ORDER BY created_at DESC, id DESC
+                """,
+                (target_id,),
+            )
+            result = dict(post)
+            result["reviews"] = [dict(row) for row in cur.fetchall()]
+            return result
+        finally:
+            conn.close()
+
+    post = await run_db_task(_sync, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return post
+
+
+@app.patch("/api/v1/editorial/review/posts/{post_id}")
+async def update_review_post(
+    post_id: int,
+    data: PostReviewUpdate,
+    authorization: Optional[str] = Header(default=None),
+    x_reviewer: Optional[str] = Header(default=None, alias="X-Reviewer"),
+):
+    require_review_token(authorization)
+    reviewer = (x_reviewer or "editor").strip()[:100] or "editor"
+    supplied = data.model_dump(exclude_unset=True)
+    if not supplied:
+        raise HTTPException(status_code=422, detail="No fields supplied")
+    if "title" in supplied and not (supplied["title"] or "").strip():
+        raise HTTPException(status_code=422, detail="Title cannot be empty")
+    if "content" in supplied and not (supplied["content"] or "").strip():
+        raise HTTPException(status_code=422, detail="Content cannot be empty")
+    if data.rating is not None and not 0 <= data.rating <= 5:
+        raise HTTPException(status_code=422, detail="Rating must be between 0 and 5")
+
+    scalar_columns = {
+        "title": "title",
+        "excerpt": "excerpt",
+        "content": "content",
+        "image_url": "image_url",
+        "rating": "rating",
+        "seo_title": "seo_title",
+        "seo_description": "seo_description",
+    }
+
+    def _sync(target_id: int, changes: Dict[str, Any], reviewer_name: str):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT tenant_id, status FROM posts WHERE id = %s FOR UPDATE",
+                (target_id,),
+            )
+            post = cur.fetchone()
+            if not post:
+                return {"error": "Post not found"}, 404
+            if post["status"] != "draft":
+                return {"error": "Only draft posts can be edited"}, 409
+
+            tenant_id = post["tenant_id"]
+            assignments = []
+            values: List[Any] = []
+            for field, column in scalar_columns.items():
+                if field in changes:
+                    assignments.append(f"{column} = %s")
+                    values.append(changes[field])
+
+            for field in ("pros", "cons", "tags"):
+                if field in changes:
+                    assignments.append(f"{field} = %s")
+                    values.append(psycopg2.extras.Json(changes[field] or []))
+
+            if "category_slug" in changes:
+                category_id = None
+                if changes["category_slug"]:
+                    cur.execute(
+                        """
+                        SELECT id FROM categories
+                        WHERE tenant_id = %s AND slug = %s
+                        """,
+                        (tenant_id, changes["category_slug"]),
+                    )
+                    category = cur.fetchone()
+                    if not category:
+                        return {"error": "Category not found for tenant"}, 422
+                    category_id = category["id"]
+                assignments.append("category_id = %s")
+                values.append(category_id)
+
+            if "product_asin" in changes:
+                product_id = None
+                if changes["product_asin"]:
+                    cur.execute(
+                        """
+                        SELECT id FROM products
+                        WHERE tenant_id = %s AND asin = %s
+                        """,
+                        (tenant_id, changes["product_asin"]),
+                    )
+                    product = cur.fetchone()
+                    if not product:
+                        return {"error": "Product ASIN not found for tenant"}, 422
+                    product_id = product["id"]
+                assignments.append("product_id = %s")
+                values.append(product_id)
+
+            assignments.append("updated_at = NOW()")
+            cur.execute(
+                f"""
+                UPDATE posts
+                SET {", ".join(assignments)}
+                WHERE id = %s AND tenant_id = %s
+                """,
+                values + [target_id, tenant_id],
+            )
+            cur.execute(
+                """
+                INSERT INTO post_reviews
+                    (tenant_id, post_id, action, reviewer, note)
+                VALUES (%s, %s, 'updated', %s, %s)
+                """,
+                (
+                    tenant_id,
+                    target_id,
+                    reviewer_name,
+                    "Campos alterados: " + ", ".join(sorted(changes)),
+                ),
+            )
+            conn.commit()
+            return {"status": "updated", "id": target_id}
+        except Exception:
+            conn.rollback()
+            logger.exception("Editorial update failed for post=%s", target_id)
+            return {"error": "Internal editorial review error"}, 500
+        finally:
+            conn.close()
+
+    result = await run_db_task(_sync, post_id, supplied, reviewer)
+    if isinstance(result, tuple):
+        raise HTTPException(status_code=result[1], detail=result[0]["error"])
+    return result
+
+
+@app.post("/api/v1/editorial/review/posts/{post_id}/decision")
+async def decide_review_post(
+    post_id: int,
+    data: PostReviewDecision,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_review_token(authorization)
+    decision = data.decision.strip().lower()
+    if decision not in {"approve", "reject"}:
+        raise HTTPException(status_code=422, detail="Unsupported review decision")
+    reviewer = data.reviewer.strip()[:100]
+    if not reviewer:
+        raise HTTPException(status_code=422, detail="Reviewer is required")
+
+    def _sync(target_id: int, action: str, reviewer_name: str, note: Optional[str]):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT tenant_id, status, title, content
+                FROM posts
+                WHERE id = %s
+                FOR UPDATE
+                """,
+                (target_id,),
+            )
+            post = cur.fetchone()
+            if not post:
+                return {"error": "Post not found"}, 404
+            if post["status"] != "draft":
+                return {"error": "Post is no longer awaiting review"}, 409
+            if action == "approve" and (
+                not post["title"].strip() or not post["content"].strip()
+            ):
+                return {"error": "Draft is incomplete"}, 422
+
+            new_status = "published" if action == "approve" else "archived"
+            audit_action = "approved" if action == "approve" else "rejected"
+            cur.execute(
+                """
+                UPDATE posts
+                SET status = %s,
+                    published_at = CASE
+                        WHEN %s = 'published' THEN NOW()
+                        ELSE published_at
+                    END,
+                    updated_at = NOW()
+                WHERE id = %s AND tenant_id = %s
+                """,
+                (new_status, new_status, target_id, post["tenant_id"]),
+            )
+            cur.execute(
+                """
+                INSERT INTO post_reviews
+                    (tenant_id, post_id, action, reviewer, note)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    post["tenant_id"],
+                    target_id,
+                    audit_action,
+                    reviewer_name,
+                    (note or "").strip() or None,
+                ),
+            )
+            conn.commit()
+            return {
+                "status": new_status,
+                "id": target_id,
+                "decision": action,
+            }
+        except Exception:
+            conn.rollback()
+            logger.exception("Editorial decision failed for post=%s", target_id)
+            return {"error": "Internal editorial review error"}, 500
+        finally:
+            conn.close()
+
+    result = await run_db_task(
+        _sync, post_id, decision, reviewer, data.note
+    )
+    if isinstance(result, tuple):
+        raise HTTPException(status_code=result[1], detail=result[0]["error"])
     return result
 
 

@@ -33,6 +33,22 @@ class ContentTokenTests(unittest.TestCase):
                 main.require_content_token("Bearer anything")
             self.assertEqual(raised.exception.status_code, 503)
 
+    def test_review_token_is_separate_from_automation_token(self):
+        with (
+            patch.object(main, "CONTENT_API_TOKEN", "automation-secret"),
+            patch.object(main, "REVIEW_API_TOKEN", "review-secret"),
+        ):
+            main.require_review_token("Bearer review-secret")
+            with self.assertRaises(HTTPException) as raised:
+                main.require_review_token("Bearer automation-secret")
+            self.assertEqual(raised.exception.status_code, 401)
+
+    def test_reports_unconfigured_review_api(self):
+        with patch.object(main, "REVIEW_API_TOKEN", ""):
+            with self.assertRaises(HTTPException) as raised:
+                main.require_review_token("Bearer anything")
+            self.assertEqual(raised.exception.status_code, 503)
+
 
 class IdempotencyTests(unittest.TestCase):
     def test_accepts_safe_key(self):

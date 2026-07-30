@@ -15,6 +15,7 @@ services:
       - DB_USER=postgres
       - DB_PASSWORD=${DB_PASSWORD}
       - CONTENT_API_TOKEN=${CONTENT_API_TOKEN}
+      - REVIEW_API_TOKEN=${REVIEW_API_TOKEN}
       - CONTENT_AUTOPUBLISH_ENABLED=${CONTENT_AUTOPUBLISH_ENABLED:-false}
       - MEDIA_ROOT=/data/media
     volumes:
@@ -31,6 +32,9 @@ services:
     environment:
       - BLOOM_API=http://bloom-api:8000
       - BLOOM_TENANT=${BLOOM_TENANT:-}
+      - REVIEW_API_TOKEN=${REVIEW_API_TOKEN}
+      - EDITORIAL_REVIEW_USER=${EDITORIAL_REVIEW_USER:-editor}
+      - EDITORIAL_REVIEW_PASSWORD=${EDITORIAL_REVIEW_PASSWORD}
       - PORT=3000
     depends_on:
       - bloom-api
