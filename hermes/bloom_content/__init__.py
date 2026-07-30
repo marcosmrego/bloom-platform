@@ -120,7 +120,22 @@ def _handle_upload_media(args: dict, **_kwargs) -> str:
             timeout=TIMEOUT,
         )
         payload = _json_response(response)
+        media_url = str(payload.get("url") or "")
+        if not media_url.startswith(f"/media/{tenant}/") or not media_url.endswith(".webp"):
+            raise RuntimeError("Bloom returned an invalid media URL")
+        verification = requests.get(
+            f"{base_url}{media_url}",
+            headers=_headers(),
+            timeout=TIMEOUT,
+        )
+        if (
+            verification.status_code != 200
+            or verification.headers.get("content-type", "").split(";", 1)[0]
+            != "image/webp"
+        ):
+            raise RuntimeError("Persisted Bloom media did not return HTTP 200 WebP")
         payload["success"] = True
+        payload["http_verified"] = True
         return tool_result(payload)
     except Exception as exc:
         return tool_error(f"Bloom media upload failed: {exc}")
