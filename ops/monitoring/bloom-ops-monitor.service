@@ -1,0 +1,14 @@
+[Unit]
+Description=Bloom Ops infrastructure monitor
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bloom-ops-monitor
+User=root
+NoNewPrivileges=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/bloom-ops
