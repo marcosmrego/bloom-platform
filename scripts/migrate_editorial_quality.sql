@@ -1,0 +1,7 @@
+BEGIN;
+
+ALTER TABLE posts
+    ADD COLUMN IF NOT EXISTS source_evidence JSONB NOT NULL DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS quality_gates JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+COMMIT;

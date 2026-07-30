@@ -13,6 +13,7 @@ from io import BytesIO
 import unicodedata
 from pathlib import Path
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 import psycopg2
 import psycopg2.extras
@@ -21,9 +22,9 @@ from fastapi.staticfiles import StaticFiles
 import asyncio
 from functools import partial
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from PIL import Image, UnidentifiedImageError
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 
 # ── Config ────────────────────────────────────────
 def get_db_password():
@@ -136,6 +137,88 @@ def post_request_hash(data: "PostCreate") -> str:
         separators=(",", ":"),
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+SENSITIVE_EDITORIAL_TERMS = {
+    "alergia",
+    "caloria",
+    "calorias",
+    "colesterol",
+    "diabetes",
+    "dieta",
+    "doença",
+    "glicemia",
+    "hipertensão",
+    "minerais",
+    "nutrição",
+    "nutricional",
+    "proteína",
+    "saúde",
+    "sódio",
+    "vitamina",
+}
+
+
+def validate_editorial_sources(data: "PostCreate") -> Dict[str, Any]:
+    """Bloqueia drafts sem evidência extraída suficiente ou fonte primária."""
+    if len(data.sources) < 2:
+        raise HTTPException(
+            status_code=422,
+            detail="At least two extracted sources are required",
+        )
+
+    normalized_urls = set()
+    for source in data.sources:
+        parsed = urlparse(source.url.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise HTTPException(status_code=422, detail="Source URL must be HTTP(S)")
+        normalized_url = parsed._replace(fragment="").geturl().rstrip("/")
+        if normalized_url in normalized_urls:
+            raise HTTPException(
+                status_code=422,
+                detail="Sources must contain at least two unique URLs",
+            )
+        normalized_urls.add(normalized_url)
+        if not source.title.strip() or not source.extracted_at.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="Each source must include title and extraction timestamp",
+            )
+        evidence = [item.strip() for item in source.evidence if item.strip()]
+        if not evidence:
+            raise HTTPException(
+                status_code=422,
+                detail="Each source must include extracted evidence",
+            )
+        if any(len(item) > 500 for item in evidence):
+            raise HTTPException(
+                status_code=422,
+                detail="Source evidence items must not exceed 500 characters",
+            )
+
+    searchable = slugify(f"{data.title} {data.excerpt or ''} {data.content}", 10000)
+    sensitive_terms = sorted(
+        term for term in SENSITIVE_EDITORIAL_TERMS if slugify(term) in searchable
+    )
+    has_primary_source = any(
+        source.source_type in {"official", "primary"} for source in data.sources
+    )
+    if sensitive_terms and not has_primary_source:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Health or nutrition content requires at least one official "
+                "or primary source"
+            ),
+        )
+
+    return {
+        "sources_extracted": True,
+        "unique_source_count": len(normalized_urls),
+        "sensitive_terms": sensitive_terms,
+        "primary_source_required": bool(sensitive_terms),
+        "primary_source_present": has_primary_source,
+    }
 
 
 def normalize_webp(content: bytes) -> bytes:
@@ -260,6 +343,15 @@ class PostDetailResponse(PostResponse):
     tenant_slug: str
     domain: str
 
+
+class SourceEvidence(BaseModel):
+    url: str
+    title: str
+    extracted_at: str
+    evidence: List[str]
+    source_type: Literal["official", "primary", "secondary"]
+
+
 class PostCreate(BaseModel):
     tenant_slug: str
     title: str
@@ -275,6 +367,7 @@ class PostCreate(BaseModel):
     tags: Optional[List[str]] = None
     seo_title: Optional[str] = None
     seo_description: Optional[str] = None
+    sources: List[SourceEvidence] = Field(default_factory=list)
     status: str = "draft"
     created_by: str = "hermes"
 
@@ -485,6 +578,7 @@ async def create_post(
 ):
     require_content_token(authorization)
     safe_key = validate_idempotency_key(idempotency_key)
+    quality_gates = validate_editorial_sources(data)
     request_hash = post_request_hash(data)
 
     if data.status not in {"draft", "published"}:
@@ -495,7 +589,13 @@ async def create_post(
             detail="Automatic publishing is disabled; create a draft instead",
         )
 
-    def _sync(tslug: str, d: PostCreate, idem_key: str, payload_hash: str):
+    def _sync(
+        tslug: str,
+        d: PostCreate,
+        idem_key: str,
+        payload_hash: str,
+        gates: Dict[str, Any],
+    ):
         conn = get_db()
         try:
             cur = conn.cursor()
@@ -575,8 +675,10 @@ async def create_post(
             cur.execute("""
                 INSERT INTO posts (tenant_id, title, slug, excerpt, content, image_url,
                     category_id, product_id, rating, pros, cons, status, tags, created_by,
-                    seo_title, seo_description, published_at)
+                    seo_title, seo_description, source_evidence, quality_gates,
+                    published_at)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                    %s,%s,
                     CASE WHEN %s = 'published' THEN NOW() ELSE NULL END)
                 RETURNING id
             """, (
@@ -586,7 +688,12 @@ async def create_post(
                 psycopg2.extras.Json(d.cons or []),
                 d.status,
                 psycopg2.extras.Json(d.tags or []),
-                d.created_by, d.seo_title, d.seo_description, d.status,
+                d.created_by, d.seo_title, d.seo_description,
+                psycopg2.extras.Json(
+                    [source.model_dump(mode="json") for source in d.sources]
+                ),
+                psycopg2.extras.Json(gates),
+                d.status,
             ))
             post_id = cur.fetchone()["id"]
             cur.execute(
@@ -612,7 +719,9 @@ async def create_post(
         finally:
             conn.close()
 
-    result = await run_db_task(_sync, tenant_slug, data, safe_key, request_hash)
+    result = await run_db_task(
+        _sync, tenant_slug, data, safe_key, request_hash, quality_gates
+    )
     # propagate HTTP-like errors
     if isinstance(result, tuple) and result[1] == 404:
         raise HTTPException(status_code=404, detail=result[0].get('error'))
@@ -633,7 +742,8 @@ def _review_post_query() -> str:
             c.slug AS category_slug, c.name AS category_name,
             pr.asin AS product_asin, pr.title AS product_title,
             p.rating, p.pros, p.cons, p.tags, p.seo_title,
-            p.seo_description, p.status, p.created_by, p.created_at,
+            p.seo_description, p.source_evidence, p.quality_gates,
+            p.status, p.created_by, p.created_at,
             p.updated_at, p.published_at
         FROM posts p
         JOIN tenants t ON t.id = p.tenant_id

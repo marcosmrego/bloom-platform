@@ -131,6 +131,11 @@ export const prerender = false;
           </div>
         </form>
 
+        <details open>
+          <summary>Evidências e gates de qualidade</summary>
+          <div id="quality-evidence" class="quality-evidence"></div>
+        </details>
+
         <div id="decision-panel" class="decision-panel">
           <label>
             Responsável
@@ -165,6 +170,7 @@ export const prerender = false;
       const form = document.querySelector<HTMLFormElement>('#edit-form')!;
       const preview = document.querySelector<HTMLIFrameElement>('#preview')!;
       const history = document.querySelector<HTMLElement>('#history')!;
+      const qualityEvidence = document.querySelector<HTMLElement>('#quality-evidence')!;
       const toast = document.querySelector<HTMLElement>('#toast')!;
       const statusFilter = document.querySelector<HTMLSelectElement>('#status')!;
       const tenantFilter = document.querySelector<HTMLSelectElement>('#tenant')!;
@@ -265,6 +271,24 @@ export const prerender = false;
             input.value = Array.isArray(post[name]) ? post[name].join(', ') : '';
           }
           decisionPanel.hidden = post.status !== 'draft';
+          const gates = post.quality_gates || {};
+          const sources = Array.isArray(post.source_evidence) ? post.source_evidence : [];
+          qualityEvidence.innerHTML = `
+            <div class="gate-summary">
+              <strong>${gates.sources_extracted ? '✓' : '✕'} Duas fontes extraídas</strong>
+              <strong>${gates.primary_source_required
+                ? (gates.primary_source_present ? '✓ Fonte primária presente' : '✕ Fonte primária ausente')
+                : '— Fonte primária não exigida'}</strong>
+            </div>
+            ${sources.length ? sources.map((source: any) => `
+              <article>
+                <span>${escapeHtml(source.source_type)}</span>
+                <a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.title)}</a>
+                <small>Extraída em ${escapeHtml(source.extracted_at)}</small>
+                <ul>${(source.evidence || []).map((item: unknown) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>
+              </article>
+            `).join('') : '<p>Nenhuma evidência estruturada registrada.</p>'}
+          `;
           history.innerHTML = post.reviews?.length
             ? post.reviews.map((item: any) => `
                 <div><strong>${escapeHtml(item.action)}</strong> · ${escapeHtml(item.reviewer)}
@@ -388,6 +412,14 @@ export const prerender = false;
   summary { cursor: pointer; font-weight: 800; }
   .history > div { padding: 12px 0; border-bottom: 1px solid #edf0ee; }
   .history p { margin: 6px 0 0; }
+  .quality-evidence { display: grid; gap: 12px; padding-top: 14px; }
+  .gate-summary { display: flex; flex-wrap: wrap; gap: 8px; }
+  .gate-summary strong { padding: 7px 10px; border-radius: 999px; color: #28563b; background: #e7f2ea; font-size: .78rem; }
+  .quality-evidence article { display: grid; gap: 5px; padding: 12px; border: 1px solid #e1e8e3; border-radius: 10px; }
+  .quality-evidence article span { color: #48805c; font-size: .7rem; font-weight: 800; text-transform: uppercase; }
+  .quality-evidence article a { color: #276841; font-weight: 800; }
+  .quality-evidence article small { color: #78827c; }
+  .quality-evidence article ul { margin: 5px 0 0; padding-left: 20px; }
   #toast { position: fixed; right: 24px; bottom: 24px; transform: translateY(120px); padding: 13px 17px; border-radius: 10px; color: white; background: #245f3c; opacity: 0; transition: .2s; }
   #toast.show { transform: none; opacity: 1; }
   #toast.error { background: #8c3131; }

@@ -8,8 +8,10 @@ from PIL import Image
 import main
 from main import (
     PostCreate,
+    SourceEvidence,
     normalize_webp,
     post_request_hash,
+    validate_editorial_sources,
     validate_idempotency_key,
 )
 
@@ -103,6 +105,81 @@ class MediaNormalizationTests(unittest.TestCase):
         Image.new("RGB", (100, 100)).save(source, "PNG")
         with self.assertRaisesRegex(ValueError, "too small"):
             normalize_webp(source.getvalue())
+
+
+def source(url, source_type="secondary", evidence=None):
+    return SourceEvidence(
+        url=url,
+        title="Fonte consultada",
+        extracted_at="2026-07-30T12:00:00Z",
+        evidence=(
+            ["Evidência efetivamente extraída da página."]
+            if evidence is None
+            else evidence
+        ),
+        source_type=source_type,
+    )
+
+
+class EditorialSourceGateTests(unittest.TestCase):
+    def post(self, **overrides):
+        values = {
+            "tenant_slug": "mundonoprato",
+            "title": "Como escolher panelas para o dia a dia",
+            "content": "Um guia prático para comparar materiais e tamanhos.",
+            "sources": [
+                source("https://example.org/guia"),
+                source("https://example.net/manual"),
+            ],
+        }
+        values.update(overrides)
+        return PostCreate(**values)
+
+    def test_accepts_two_unique_extracted_sources(self):
+        result = validate_editorial_sources(self.post())
+
+        self.assertTrue(result["sources_extracted"])
+        self.assertEqual(result["unique_source_count"], 2)
+        self.assertFalse(result["primary_source_required"])
+
+    def test_rejects_less_than_two_sources(self):
+        with self.assertRaises(HTTPException) as raised:
+            validate_editorial_sources(
+                self.post(sources=[source("https://example.org/guia")])
+            )
+        self.assertEqual(raised.exception.status_code, 422)
+
+    def test_rejects_duplicate_or_evidenceless_sources(self):
+        for sources in (
+            [
+                source("https://example.org/guia"),
+                source("https://example.org/guia"),
+            ],
+            [
+                source("https://example.org/guia", evidence=[""]),
+                source("https://example.net/manual"),
+            ],
+        ):
+            with self.subTest(sources=sources):
+                with self.assertRaises(HTTPException) as raised:
+                    validate_editorial_sources(self.post(sources=sources))
+                self.assertEqual(raised.exception.status_code, 422)
+
+    def test_health_content_requires_official_or_primary_source(self):
+        health_post = self.post(
+            title="Sódio e saúde na alimentação",
+            content="Comparação nutricional entre ingredientes.",
+        )
+        with self.assertRaises(HTTPException) as raised:
+            validate_editorial_sources(health_post)
+        self.assertIn("official", raised.exception.detail)
+
+        health_post.sources[0] = source(
+            "https://www.gov.br/saude/guia", source_type="official"
+        )
+        result = validate_editorial_sources(health_post)
+        self.assertTrue(result["primary_source_required"])
+        self.assertTrue(result["primary_source_present"])
 
 
 if __name__ == "__main__":

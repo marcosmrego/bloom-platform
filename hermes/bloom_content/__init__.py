@@ -143,6 +143,25 @@ def _handle_create_draft(args: dict, **_kwargs) -> str:
             raise ValueError("post.title is required")
         if not str(payload.get("content") or "").strip():
             raise ValueError("post.content is required")
+        sources = payload.get("sources")
+        if not isinstance(sources, list) or len(sources) < 2:
+            raise ValueError("post.sources must contain at least two extracted sources")
+        unique_urls = set()
+        for source in sources:
+            if not isinstance(source, dict):
+                raise ValueError("each source must be an object")
+            source_url = str(source.get("url") or "").strip()
+            parsed_source = urlparse(source_url)
+            if parsed_source.scheme not in {"http", "https"} or not parsed_source.netloc:
+                raise ValueError("each source must have a valid HTTP(S) URL")
+            unique_urls.add(source_url.rstrip("/"))
+            evidence = source.get("evidence")
+            if not isinstance(evidence, list) or not any(
+                str(item).strip() for item in evidence
+            ):
+                raise ValueError("each source must include extracted evidence")
+        if len(unique_urls) < 2:
+            raise ValueError("post.sources must contain two unique URLs")
 
         base_url, _token = _config()
         headers = _headers()
@@ -216,6 +235,34 @@ BLOOM_CREATE_DRAFT_SCHEMA = {
                     "tags": {"type": "array", "items": {"type": "string"}},
                     "seo_title": {"type": "string"},
                     "seo_description": {"type": "string"},
+                    "sources": {
+                        "type": "array",
+                        "minItems": 2,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "url": {"type": "string", "format": "uri"},
+                                "title": {"type": "string", "minLength": 1},
+                                "extracted_at": {"type": "string", "minLength": 1},
+                                "evidence": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "items": {"type": "string", "minLength": 1},
+                                },
+                                "source_type": {
+                                    "type": "string",
+                                    "enum": ["official", "primary", "secondary"],
+                                },
+                            },
+                            "required": [
+                                "url",
+                                "title",
+                                "extracted_at",
+                                "evidence",
+                                "source_type",
+                            ],
+                        },
+                    },
                 },
                 "required": [
                     "title",
@@ -226,6 +273,7 @@ BLOOM_CREATE_DRAFT_SCHEMA = {
                     "tags",
                     "seo_title",
                     "seo_description",
+                    "sources",
                 ],
             },
         },
