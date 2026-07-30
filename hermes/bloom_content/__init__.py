@@ -120,7 +120,7 @@ def _handle_upload_media(args: dict, **_kwargs) -> str:
             timeout=TIMEOUT,
         )
         payload = _json_response(response)
-        media_url = str(payload.get("url") or "")
+        media_url = str(payload.get("image_url") or "")
         if not media_url.startswith(f"/media/{tenant}/") or not media_url.endswith(".webp"):
             raise RuntimeError("Bloom returned an invalid media URL")
         verification = requests.get(
