@@ -70,10 +70,15 @@ export function getPostImage(
   config: SiteConfig,
   post: { image_url?: string | null; product_image?: string | null; category_slug?: string | null },
 ): string {
-  return post.image_url
+  const image = post.image_url
     || post.product_image
     || config.categoryPlaceholders[post.category_slug || '']
     || config.placeholderImg;
+  if (image.startsWith('/media/')) {
+    const mediaBase = process.env.PUBLIC_MEDIA_BASE || 'https://api.expansao-ai.com.br';
+    return new URL(image, mediaBase).toString();
+  }
+  return image;
 }
 
 export function absoluteSiteUrl(config: SiteConfig, path = '/'): string {
