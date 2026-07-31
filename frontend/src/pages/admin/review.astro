@@ -297,11 +297,12 @@ export const prerender = false;
   .icon-button { width: 38px; height: 38px; border: 1px solid #dde4df; border-radius: 9px; color: #42604d; background: #f6f8f6; font-size: 1.2rem; }
   .post-list { height: calc(100% - 82px); overflow: auto; }
   .post-item { width: 100%; display: grid; gap: 8px; padding: 17px 18px; text-align: left; border: 0; border-bottom: 1px solid #edf0ed; color: #101713; background: #fff; }
+  .post-item, .post-item * { color: #000 !important; -webkit-text-fill-color: #000 !important; }
   .post-item:hover { background: #f7f9f7; }
   .post-item.active { background: #f4f7f3; box-shadow: inset 4px 0 #a4773e; }
   .item-meta { display: flex; justify-content: space-between; align-items: center; }
-  .item-meta span { color: #497258; font-size: .66rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
-  .item-meta small, .post-item time { color: #8a938d; font-size: .7rem; }
+  .item-meta span { font-size: .66rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+  .item-meta small, .post-item time { font-size: .7rem; }
   .post-item strong { color: #101713; line-height: 1.3; }
   .post-item p { display: -webkit-box; overflow: hidden; margin: 0; color: #263129; font-size: .79rem; line-height: 1.45; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .loading, .queue-empty { padding: 28px 18px; color: #78817b; text-align: center; }
