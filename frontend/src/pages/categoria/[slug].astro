@@ -12,6 +12,7 @@ const { slug } = Astro.params;
 const posts = await getPosts(TENANT, slug!);
 const categories = await getCategories(TENANT);
 const config = getSiteConfig(TENANT);
+const brandLogo = config.slug === 'mundonoprato' ? '/images/branding/mundonoprato-logo.png' : null;
 const category = categories.find(item => item.slug === slug);
 const displayName = category?.name || posts[0]?.category_name || slug;
 const pageTitle = `${displayName} — ${config.name}`;
@@ -40,6 +41,9 @@ const categoryJsonLd = {
     .container { max-width: 1000px; margin: 0 auto; padding: 0 1rem; }
     header { background: var(--accent); color: #fff; padding: 1.2rem 0; margin-bottom: 2rem; }
     header a { color: #fff; text-decoration: none; }
+    .header-content { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
+    .brand-link { display: inline-flex; align-items: center; gap: 0.55rem; font-weight: 700; }
+    .brand-logo { width: 38px; height: 38px; object-fit: cover; border-radius: 9px; border: 1px solid rgba(255,255,255,0.6); }
     .posts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 3rem; }
     .card { background: var(--card); border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); transition: transform 0.2s; }
     .card:hover { transform: translateY(-3px); }
@@ -55,7 +59,7 @@ const categoryJsonLd = {
 </head>
 <body>
   <MonetizationBody />
-  <header><div class="container"><a href="/">← {config.name}</a> / <strong>{displayName}</strong></div></header>
+  <header><div class="container header-content"><a class="brand-link" href="/">{brandLogo && <img class="brand-logo" src={brandLogo} alt="" width="38" height="38" />}<span>← {config.name}</span></a> / <strong>{displayName}</strong></div></header>
   <main class="container">
     <h2 style="margin-bottom:1.5rem">{displayName} ({posts.length} {posts.length === 1 ? config.contentLabel : config.contentLabelPlural})</h2>
     <div class="posts-grid">
