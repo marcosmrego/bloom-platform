@@ -107,7 +107,7 @@ const websiteJsonLd = [
 
     const updatePresence = async () => {
       try {
-        const response = await fetch('/api/presence', {
+        const response = await fetch('/presence.json', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ visitorId }),
