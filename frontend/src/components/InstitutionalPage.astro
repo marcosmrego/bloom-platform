@@ -4,6 +4,7 @@ import { getSiteConfig } from '../lib/site';
 import SeoHead from './SeoHead.astro';
 import MonetizationHead from './MonetizationHead.astro';
 import MonetizationBody from './MonetizationBody.astro';
+import GoogleAnalytics from './GoogleAnalytics.astro';
 import SiteFooter from './SiteFooter.astro';
 
 interface Props {
@@ -22,6 +23,7 @@ const config = getSiteConfig(getTenantFromHost(Astro.url.hostname));
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <SeoHead config={config} title={`${title} — ${config.name}`} description={description} path={path} />
+  <GoogleAnalytics config={config} />
   <MonetizationHead />
   <style define:vars={{ accent: config.accent }}>
     * { box-sizing: border-box; }
@@ -45,4 +47,3 @@ const config = getSiteConfig(getTenantFromHost(Astro.url.hostname));
   <SiteFooter config={config} />
 </body>
 </html>
-

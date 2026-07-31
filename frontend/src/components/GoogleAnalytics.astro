@@ -1,0 +1,23 @@
+---
+import type { SiteConfig } from '../lib/site';
+
+interface Props {
+  config: SiteConfig;
+}
+
+const { config } = Astro.props;
+const measurementId = config.analyticsMeasurementId?.trim();
+const enabled = Boolean(measurementId && /^G-[A-Z0-9]+$/.test(measurementId));
+---
+
+{enabled && (
+  <>
+    <script async src={`https://www.googletagmanager.com/gtag/js?id=${measurementId}`}></script>
+    <script is:inline define:vars={{ measurementId }}>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', measurementId);
+    </script>
+  </>
+)}

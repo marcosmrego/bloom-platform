@@ -6,6 +6,7 @@ import { getPostImage, getSiteConfig } from '../../lib/site';
 import SeoHead from '../../components/SeoHead.astro';
 import MonetizationHead from '../../components/MonetizationHead.astro';
 import MonetizationBody from '../../components/MonetizationBody.astro';
+import GoogleAnalytics from '../../components/GoogleAnalytics.astro';
 import SiteFooter from '../../components/SiteFooter.astro';
 
 const TENANT = getTenantFromHost(Astro.url.hostname);
@@ -49,6 +50,7 @@ const articleJsonLd = {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <SeoHead config={tenantConfig} title={seoTitle} description={seoDescription} path={`/blog/${encodeURIComponent(post.slug)}`} image={heroImage} type="article" publishedTime={post.published_at} modifiedTime={post.updated_at} jsonLd={articleJsonLd} />
+  <GoogleAnalytics config={tenantConfig} />
   <MonetizationHead />
   <style define:vars={{ accent: tenantConfig.accent }}>
     :root { --accent: var(--accent-custom, #e63946); }

@@ -10,6 +10,7 @@ export interface SiteConfig {
   accent: string;
   contentLabel: string;
   contentLabelPlural: string;
+  analyticsMeasurementId?: string;
   placeholderImg: string;
   categoryPlaceholders: Record<string, string>;
 }
@@ -48,6 +49,7 @@ const sites: Record<string, SiteConfig> = {
     accent: '#c7512e',
     contentLabel: 'artigo',
     contentLabelPlural: 'artigos',
+    analyticsMeasurementId: 'G-SK4PWW2V3Y',
     placeholderImg: 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=800&fit=crop',
     categoryPlaceholders: {
       receitas: 'https://images.unsplash.com/photo-1547592180-85f173990554?w=800&fit=crop',

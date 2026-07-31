@@ -5,6 +5,7 @@ import { getPostImage, getSiteConfig } from '../../lib/site';
 import SeoHead from '../../components/SeoHead.astro';
 import MonetizationHead from '../../components/MonetizationHead.astro';
 import MonetizationBody from '../../components/MonetizationBody.astro';
+import GoogleAnalytics from '../../components/GoogleAnalytics.astro';
 import SiteFooter from '../../components/SiteFooter.astro';
 
 const TENANT = getTenantFromHost(Astro.url.hostname);
@@ -33,6 +34,7 @@ const categoryJsonLd = {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <SeoHead config={config} title={pageTitle} description={pageDescription} path={`/categoria/${encodeURIComponent(slug!)}`} jsonLd={categoryJsonLd} />
+  <GoogleAnalytics config={config} />
   <MonetizationHead />
   <style define:vars={{ siteAccent: config.accent }}>
     :root { --accent: var(--siteAccent); --bg: #f8f9fa; --card: #fff; --text: #212529; --muted: #6c757d; --border: #dee2e6; }
