@@ -32,10 +32,12 @@ const websiteJsonLd = [
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f4f5f7; color: #1a1a2e; line-height: 1.6; }
     .container { max-width: 1100px; margin: 0 auto; padding: 0 1.2rem; }
     header { background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 70%, #000)); color: #fff; padding: 2.5rem 0 2rem; margin-bottom: 2rem; }
-    header h1 { font-size: 2rem; font-weight: 800; letter-spacing: -0.5px; }
-    header p { opacity: 0.85; font-size: 1.05rem; margin-top: 0.3rem; }
-    .brand-lockup { display: flex; align-items: center; gap: 1.5rem; }
+    header p { opacity: 0.92; font-size: 1.1rem; }
+    .brand-lockup { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 1.5rem; }
     .site-logo { width: 150px; height: 150px; flex: 0 0 auto; object-fit: cover; border-radius: 24px; border: 2px solid rgba(255,255,255,0.55); box-shadow: 0 12px 32px rgba(0,0,0,0.24); }
+    .brand-tagline { max-width: 470px; font-family: Georgia, 'Times New Roman', serif; font-size: clamp(1.25rem, 2.5vw, 1.75rem); line-height: 1.35; letter-spacing: 0.01em; text-wrap: balance; }
+    .live-presence { align-self: start; display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.42rem 0.65rem; border: 1px solid rgba(255,255,255,0.3); border-radius: 999px; background: rgba(0,0,0,0.14); color: rgba(255,255,255,0.86); font-size: 0.72rem; white-space: nowrap; backdrop-filter: blur(4px); }
+    .live-dot { width: 0.48rem; height: 0.48rem; border-radius: 50%; background: #a7f3b7; box-shadow: 0 0 0 3px rgba(167,243,183,0.16); }
     .cats { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2rem; }
     .cats a { background: #fff; border: 1px solid #e0e0e0; padding: 0.45rem 1rem; border-radius: 20px; text-decoration: none; color: #555; font-size: 0.85rem; font-weight: 500; transition: all 0.2s; }
     .cats a:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -53,7 +55,7 @@ const websiteJsonLd = [
     .card-rating { color: #e6a817; font-size: 0.82rem; }
     .card-date { font-size: 0.72rem; color: #999; margin-top: 0.5rem; }
     footer { text-align: center; padding: 2.5rem 0; color: #999; font-size: 0.85rem; border-top: 1px solid #eee; margin-top: 2rem; }
-    @media (max-width: 600px) { .posts-grid { grid-template-columns: 1fr; } header h1 { font-size: 1.5rem; } .brand-lockup { flex-direction: column; text-align: center; gap: 1rem; } .site-logo { width: 112px; height: 112px; border-radius: 18px; } }
+    @media (max-width: 700px) { .posts-grid { grid-template-columns: 1fr; } .brand-lockup { grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 1rem; } .site-logo { width: 132px; height: 132px; border-radius: 20px; } .live-presence { position: absolute; top: 0.8rem; right: 1rem; } header { position: relative; } }
   </style>
 </head>
 <body>
@@ -61,10 +63,8 @@ const websiteJsonLd = [
   <header>
     <div class="container brand-lockup">
       {brandLogo && <img class="site-logo" src={brandLogo} alt={`Logo ${config.name}`} width="150" height="150" />}
-      <div>
-        <h1>{config.heading}</h1>
-        <p>{config.subtitle}</p>
-      </div>
+      <p class="brand-tagline">Uma viagem pelo mundo, servida à mesa.</p>
+      {brandLogo && <div class="live-presence" title="Visitantes ativos nos últimos instantes" aria-live="polite"><span class="live-dot"></span><span id="live-count">Presença ao vivo</span></div>}
     </div>
   </header>
 
@@ -96,5 +96,34 @@ const websiteJsonLd = [
   </main>
 
   <SiteFooter config={config} />
+  {brandLogo && <script>
+    const counter = document.querySelector('#live-count');
+    const storageKey = 'bloom-presence-id';
+    let visitorId = sessionStorage.getItem(storageKey);
+    if (!visitorId) {
+      visitorId = crypto.randomUUID();
+      sessionStorage.setItem(storageKey, visitorId);
+    }
+
+    const updatePresence = async () => {
+      try {
+        const response = await fetch('/api/presence', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ visitorId }),
+          cache: 'no-store',
+        });
+        const { count } = await response.json();
+        if (counter && Number.isFinite(count)) {
+          counter.textContent = `${count} ${count === 1 ? 'pessoa online' : 'pessoas online'}`;
+        }
+      } catch {
+        if (counter) counter.textContent = 'Presença ao vivo';
+      }
+    };
+
+    updatePresence();
+    window.setInterval(updatePresence, 30000);
+  </script>}
 </body>
 </html>
