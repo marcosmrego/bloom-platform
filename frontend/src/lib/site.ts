@@ -12,6 +12,7 @@ export interface SiteConfig {
   contentLabel: string;
   contentLabelPlural: string;
   analyticsMeasurementId?: string;
+  pinterestDomainVerify?: string;
   placeholderImg: string;
   categoryPlaceholders: Record<string, string>;
 }
@@ -31,6 +32,7 @@ const sites: Record<string, SiteConfig> = {
     contentLabel: 'review',
     contentLabelPlural: 'reviews',
     analyticsMeasurementId: 'G-4RJGP5MCWT',
+    pinterestDomainVerify: '6a943b92f03557932645fb1dc8c0e8d0',
     placeholderImg: 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=800&fit=crop',
     categoryPlaceholders: {
       eletronicos: 'https://images.unsplash.com/photo-1468495244123-6c6c332eeece?w=800&fit=crop',
