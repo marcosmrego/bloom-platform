@@ -13,7 +13,7 @@ const { slug } = Astro.params;
 const posts = await getPosts(TENANT, slug!);
 const categories = await getCategories(TENANT);
 const config = getSiteConfig(TENANT);
-const brandLogo = config.slug === 'mundonoprato' ? '/images/branding/mundonoprato-logo.png' : null;
+const brandLogo = config.brandLogo;
 const category = categories.find(item => item.slug === slug);
 const displayName = category?.name || posts[0]?.category_name || slug;
 const pageTitle = `${displayName} — ${config.name}`;

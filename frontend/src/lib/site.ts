@@ -6,6 +6,7 @@ export interface SiteConfig {
   description: string;
   heading: string;
   subtitle: string;
+  brandLogo: string;
   footer: string;
   accent: string;
   contentLabel: string;
@@ -24,10 +25,12 @@ const sites: Record<string, SiteConfig> = {
     description: 'Descubra produtos com melhor custo-benefício. Reviews reais e links diretos para comprar.',
     heading: '🔥 ViralBarato',
     subtitle: 'Reviews honestas. Links diretos. Menor preço.',
+    brandLogo: '/images/branding/viralbarato-logo.png',
     footer: '© 2026 ViralBarato. Links de afiliado Amazon.',
     accent: '#e63946',
     contentLabel: 'review',
     contentLabelPlural: 'reviews',
+    analyticsMeasurementId: 'G-4RJGP5MCWT',
     placeholderImg: 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=800&fit=crop',
     categoryPlaceholders: {
       eletronicos: 'https://images.unsplash.com/photo-1468495244123-6c6c332eeece?w=800&fit=crop',
@@ -45,6 +48,7 @@ const sites: Record<string, SiteConfig> = {
     description: 'Receitas, histórias e sabores de todos os cantos do planeta. Do Mediterrâneo à Ásia.',
     heading: '🌍 Mundo no Prato',
     subtitle: 'Receitas, ingredientes e histórias da gastronomia mundial.',
+    brandLogo: '/images/branding/mundonoprato-logo.png',
     footer: '© 2026 Mundo no Prato. Gastronomia sem fronteiras.',
     accent: '#c7512e',
     contentLabel: 'artigo',

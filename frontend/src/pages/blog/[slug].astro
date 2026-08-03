@@ -25,7 +25,7 @@ const htmlContent = post.content ? marked.parse(post.content) : '';
 const stars = post.rating ? '★'.repeat(Math.floor(post.rating)) : '';
 const price = post.price || post.product_price;
 const tenantConfig = getSiteConfig(TENANT);
-const brandLogo = tenantConfig.slug === 'mundonoprato' ? '/images/branding/mundonoprato-logo.png' : null;
+const brandLogo = tenantConfig.brandLogo;
 const heroImage = getPostImage(tenantConfig, post);
 const seoTitle = post.seo_title || `${post.title} — ${tenantConfig.name}`;
 const seoDescription = post.seo_description || post.excerpt || post.title;

@@ -12,7 +12,7 @@ const TENANT = getTenantFromHost(Astro.url.hostname);
 const posts = await getPosts(TENANT);
 const categories = await getCategories(TENANT);
 const config = getSiteConfig(TENANT);
-const brandLogo = config.slug === 'mundonoprato' ? '/images/branding/mundonoprato-logo.png' : null;
+const brandLogo = config.brandLogo;
 const brandLogoUrl = brandLogo ? `https://${config.domain}${brandLogo}` : null;
 const websiteJsonLd = [
   { '@context': 'https://schema.org', '@type': 'WebSite', name: config.name, url: `https://${config.domain}/`, description: config.description, inLanguage: 'pt-BR' },
@@ -37,6 +37,7 @@ const websiteJsonLd = [
     header p { opacity: 0.92; font-size: 1.1rem; }
     .brand-lockup { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 1.5rem; }
     .site-logo { width: 150px; height: 150px; flex: 0 0 auto; object-fit: cover; border-radius: 24px; border: 2px solid rgba(255,255,255,0.55); box-shadow: 0 12px 32px rgba(0,0,0,0.24); }
+    .site-logo-viralbarato { width: min(420px, 46vw); object-fit: contain; border-radius: 18px; }
     .brand-tagline { max-width: 470px; font-family: Georgia, 'Times New Roman', serif; font-size: clamp(1.25rem, 2.5vw, 1.75rem); line-height: 1.35; letter-spacing: 0.01em; text-wrap: balance; }
     .live-presence { align-self: start; display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.42rem 0.65rem; border: 1px solid rgba(255,255,255,0.3); border-radius: 999px; background: rgba(0,0,0,0.14); color: rgba(255,255,255,0.86); font-size: 0.72rem; white-space: nowrap; backdrop-filter: blur(4px); }
     .live-dot { width: 0.48rem; height: 0.48rem; border-radius: 50%; background: #a7f3b7; box-shadow: 0 0 0 3px rgba(167,243,183,0.16); }
@@ -57,16 +58,16 @@ const websiteJsonLd = [
     .card-rating { color: #e6a817; font-size: 0.82rem; }
     .card-date { font-size: 0.72rem; color: #999; margin-top: 0.5rem; }
     footer { text-align: center; padding: 2.5rem 0; color: #999; font-size: 0.85rem; border-top: 1px solid #eee; margin-top: 2rem; }
-    @media (max-width: 700px) { .posts-grid { grid-template-columns: 1fr; } .brand-lockup { grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 1rem; } .site-logo { width: 132px; height: 132px; border-radius: 20px; } .live-presence { position: absolute; top: 0.8rem; right: 1rem; } header { position: relative; } }
+    @media (max-width: 700px) { .posts-grid { grid-template-columns: 1fr; } .brand-lockup { grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 1rem; } .site-logo { width: 132px; height: 132px; border-radius: 20px; } .site-logo-viralbarato { width: min(340px, 88vw); height: auto; aspect-ratio: 3 / 2; } .live-presence { position: absolute; top: 0.8rem; right: 1rem; } header { position: relative; } }
   </style>
 </head>
 <body>
   <MonetizationBody />
   <header>
     <div class="container brand-lockup">
-      {brandLogo && <img class="site-logo" src={brandLogo} alt={`Logo ${config.name}`} width="150" height="150" />}
-      <p class="brand-tagline">Uma viagem pelo mundo, servida à mesa.</p>
-      {brandLogo && <div class="live-presence" title="Visitantes ativos nos últimos instantes" aria-live="polite"><span class="live-dot"></span><span id="live-count">Presença ao vivo</span></div>}
+      <img class={`site-logo site-logo-${config.slug}`} src={brandLogo} alt={`Logo ${config.name}`} width="150" height="150" />
+      <p class="brand-tagline">{config.subtitle}</p>
+      <div class="live-presence" title="Visitantes ativos nos últimos instantes" aria-live="polite"><span class="live-dot"></span><span id="live-count">Presença ao vivo</span></div>
     </div>
   </header>
 
@@ -98,7 +99,7 @@ const websiteJsonLd = [
   </main>
 
   <SiteFooter config={config} />
-  {brandLogo && <script>
+  <script>
     const counter = document.querySelector('#live-count');
     const storageKey = 'bloom-presence-id';
     let visitorId = sessionStorage.getItem(storageKey);
@@ -126,6 +127,6 @@ const websiteJsonLd = [
 
     updatePresence();
     window.setInterval(updatePresence, 30000);
-  </script>}
+  </script>
 </body>
 </html>
