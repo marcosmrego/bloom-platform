@@ -15,6 +15,7 @@ import unicodedata
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
+from datetime import date, datetime, timezone
 
 import psycopg2
 import psycopg2.extras
@@ -510,6 +511,11 @@ class PostReviewUpdate(BaseModel):
     tags: Optional[List[str]] = None
     seo_title: Optional[str] = None
     seo_description: Optional[str] = None
+    commerce_link_type: Optional[Literal["product", "search", "offer"]] = None
+    commerce_url: Optional[str] = None
+    coupon_code: Optional[str] = None
+    offer_text: Optional[str] = None
+    offer_valid_until: Optional[datetime] = None
 
 
 class PostReviewDecision(BaseModel):
@@ -738,6 +744,84 @@ async def check_topic_similarity(
     }
 
 
+@app.get("/api/v1/{tenant_slug}/editorial/seasonal-opportunities")
+async def list_seasonal_opportunities(
+    tenant_slug: str,
+    as_of: Optional[str] = None,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_content_token(authorization)
+    try:
+        reference_date = date.fromisoformat(as_of) if as_of else date.today()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="as_of must use YYYY-MM-DD") from exc
+
+    def _sync(tslug: str, reference: date):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM tenants WHERE slug = %s", (tslug,))
+            tenant = cur.fetchone()
+            if not tenant:
+                return None
+            cur.execute(
+                """
+                SELECT e.id, e.slug, e.name, e.event_date,
+                       e.planning_start_date, e.publishing_end_date,
+                       e.priority, e.audience_intent,
+                       (e.event_date - %s::date) AS days_until,
+                       st.id AS target_id, st.product_id, pr.asin,
+                       pr.title AS product_title, st.search_query,
+                       st.rationale, st.priority AS target_priority,
+                       st.status AS target_status
+                FROM seasonal_events e
+                LEFT JOIN seasonal_product_targets st
+                  ON st.event_id = e.id AND st.tenant_id = %s
+                LEFT JOIN products pr
+                  ON pr.id = st.product_id AND pr.tenant_id = st.tenant_id
+                WHERE e.active = TRUE
+                  AND %s::date BETWEEN e.planning_start_date AND e.event_date
+                ORDER BY e.priority DESC, e.event_date, st.priority DESC
+                """,
+                (reference, tenant["id"], reference),
+            )
+            events: Dict[int, Dict[str, Any]] = {}
+            for row in cur.fetchall():
+                event_id = row["id"]
+                event = events.setdefault(event_id, {
+                    "id": event_id,
+                    "slug": row["slug"],
+                    "name": row["name"],
+                    "event_date": row["event_date"],
+                    "planning_start_date": row["planning_start_date"],
+                    "publishing_end_date": row["publishing_end_date"],
+                    "priority": row["priority"],
+                    "audience_intent": row["audience_intent"],
+                    "days_until": row["days_until"],
+                    "inside_publishing_window": reference <= row["publishing_end_date"],
+                    "targets": [],
+                })
+                if row["target_id"]:
+                    event["targets"].append({
+                        "id": row["target_id"],
+                        "product_id": row["product_id"],
+                        "asin": row["asin"],
+                        "product_title": row["product_title"],
+                        "search_query": row["search_query"],
+                        "rationale": row["rationale"],
+                        "priority": row["target_priority"],
+                        "status": row["target_status"],
+                    })
+            return list(events.values())
+        finally:
+            conn.close()
+
+    opportunities = await run_db_task(_sync, tenant_slug, reference_date)
+    if opportunities is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return {"as_of": reference_date, "items": opportunities}
+
+
 @app.post("/api/v1/{tenant_slug}/posts")
 async def create_post(
     tenant_slug: str,
@@ -936,7 +1020,13 @@ def _review_post_query() -> str:
             p.title, p.slug, p.excerpt, p.content, p.image_url,
             c.slug AS category_slug, c.name AS category_name,
             pr.asin AS product_asin, pr.title AS product_title,
-            pr.affiliate_url,
+            COALESCE(pc.destination_url, pr.affiliate_url) AS affiliate_url,
+            pc.link_type AS commerce_link_type,
+            pc.destination_url AS commerce_url,
+            pc.coupon_code,
+            pc.offer_text,
+            pc.valid_until AS offer_valid_until,
+            pc.verified_at AS offer_verified_at,
             p.rating, p.pros, p.cons, p.tags, p.seo_title,
             p.seo_description, p.source_evidence, p.quality_gates,
             p.status, p.created_by, p.created_at,
@@ -947,6 +1037,8 @@ def _review_post_query() -> str:
           ON c.id = p.category_id AND c.tenant_id = p.tenant_id
         LEFT JOIN products pr
           ON pr.id = p.product_id AND pr.tenant_id = p.tenant_id
+        LEFT JOIN post_commerce pc
+          ON pc.post_id = p.id AND pc.tenant_id = p.tenant_id
     """
 
 
@@ -1070,6 +1162,41 @@ async def update_review_post(
         raise HTTPException(status_code=422, detail="Content cannot be empty")
     if data.rating is not None and not 0 <= data.rating <= 5:
         raise HTTPException(status_code=422, detail="Rating must be between 0 and 5")
+    commerce_fields = {
+        "commerce_link_type", "commerce_url", "coupon_code", "offer_text",
+        "offer_valid_until",
+    }
+    commerce_changed = bool(commerce_fields.intersection(supplied))
+    if supplied.get("commerce_link_type"):
+        commerce_url = (supplied.get("commerce_url") or "").strip()
+        parsed_commerce_url = urlparse(commerce_url)
+        if parsed_commerce_url.scheme != "https" or parsed_commerce_url.hostname not in {
+            "amazon.com.br", "www.amazon.com.br"
+        }:
+            raise HTTPException(
+                status_code=422,
+                detail="Commerce URL must be an HTTPS amazon.com.br URL",
+            )
+        if "tag=marcosmrego-20" not in parsed_commerce_url.query:
+            raise HTTPException(
+                status_code=422,
+                detail="Commerce URL must contain the configured affiliate tag",
+            )
+        if supplied["commerce_link_type"] == "offer" and not (
+            supplied.get("offer_text") or ""
+        ).strip():
+            raise HTTPException(status_code=422, detail="Offer text is required")
+        valid_until = supplied.get("offer_valid_until")
+        if valid_until:
+            comparable_until = valid_until
+            if comparable_until.tzinfo is None:
+                comparable_until = comparable_until.replace(tzinfo=timezone.utc)
+            if comparable_until <= datetime.now(timezone.utc):
+                raise HTTPException(status_code=422, detail="Offer validity must be in the future")
+        if supplied["commerce_link_type"] == "product" and not (
+            supplied.get("product_asin") or ""
+        ).strip():
+            raise HTTPException(status_code=422, detail="Product link requires an ASIN")
 
     scalar_columns = {
         "title": "title",
@@ -1141,6 +1268,50 @@ async def update_review_post(
                     product_id = product["id"]
                 assignments.append("product_id = %s")
                 values.append(product_id)
+
+            if commerce_changed:
+                link_type = changes.get("commerce_link_type")
+                if not link_type:
+                    cur.execute(
+                        "DELETE FROM post_commerce WHERE post_id = %s AND tenant_id = %s",
+                        (target_id, tenant_id),
+                    )
+                else:
+                    commerce_product_id = product_id if "product_asin" in changes else None
+                    if "product_asin" not in changes:
+                        cur.execute(
+                            "SELECT product_id FROM posts WHERE id = %s AND tenant_id = %s",
+                            (target_id, tenant_id),
+                        )
+                        commerce_product_id = cur.fetchone()["product_id"]
+                    if link_type == "product" and not commerce_product_id:
+                        return {"error": "Product link requires an associated ASIN"}, 422
+                    cur.execute(
+                        """
+                        INSERT INTO post_commerce (
+                            tenant_id, post_id, link_type, product_id,
+                            destination_url, coupon_code, offer_text,
+                            valid_until, verified_at, status
+                        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NOW(),'active')
+                        ON CONFLICT (post_id) DO UPDATE SET
+                            link_type = EXCLUDED.link_type,
+                            product_id = EXCLUDED.product_id,
+                            destination_url = EXCLUDED.destination_url,
+                            coupon_code = EXCLUDED.coupon_code,
+                            offer_text = EXCLUDED.offer_text,
+                            valid_until = EXCLUDED.valid_until,
+                            verified_at = NOW(),
+                            status = 'active',
+                            updated_at = NOW()
+                        """,
+                        (
+                            tenant_id, target_id, link_type, commerce_product_id,
+                            changes.get("commerce_url"),
+                            (changes.get("coupon_code") or "").strip() or None,
+                            (changes.get("offer_text") or "").strip() or None,
+                            changes.get("offer_valid_until") or None,
+                        ),
+                    )
 
             assignments.append("updated_at = NOW()")
             cur.execute(

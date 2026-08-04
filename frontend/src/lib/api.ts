@@ -21,6 +21,11 @@ export interface Post {
   product_price: number | null;
   product_image: string | null;
   affiliate_url: string | null;
+  commerce_link_type?: 'product' | 'search' | 'offer' | null;
+  coupon_code?: string | null;
+  offer_text?: string | null;
+  offer_valid_until?: string | null;
+  offer_verified_at?: string | null;
   tenant_name?: string;
   seo_title?: string | null;
   seo_description?: string | null;

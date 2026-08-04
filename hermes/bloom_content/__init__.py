@@ -75,6 +75,11 @@ def _handle_context(args: dict, **_kwargs) -> str:
             params={"page": 1, "page_size": 50},
             timeout=TIMEOUT,
         )
+        seasonal = requests.get(
+            f"{base_url}/api/v1/{tenant}/editorial/seasonal-opportunities",
+            headers=_headers(),
+            timeout=TIMEOUT,
+        )
         return tool_result(
             {
                 "success": True,
@@ -87,6 +92,7 @@ def _handle_context(args: dict, **_kwargs) -> str:
                     }
                     for item in _json_response(posts).get("items", [])
                 ],
+                "seasonal_opportunities": _json_response(seasonal).get("items", []),
             }
         )
     except Exception as exc:
@@ -225,7 +231,7 @@ def _handle_create_draft(args: dict, **_kwargs) -> str:
 
 BLOOM_CONTEXT_SCHEMA = {
     "name": "bloom_context",
-    "description": "List the allowed tenant's categories and recent published posts before choosing a topic.",
+    "description": "List categories, recent posts and active seasonal opportunities before choosing a topic.",
     "parameters": {
         "type": "object",
         "properties": {

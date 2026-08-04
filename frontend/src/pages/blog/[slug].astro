@@ -92,6 +92,11 @@ const articleJsonLd = {
     .cons h3 { color: #c62828; }
     .pros ul, .cons ul { margin-bottom: 0 !important; }
     .buy-section { margin-top: 2.5rem; padding-top: 1.5rem; border-top: 2px solid #f0f0f0; text-align: center; }
+    .buy-section > * { display: block; width: fit-content; margin-left: auto; margin-right: auto; }
+    .offer-text { margin-bottom: .55rem; color: #173d27; font-size: 1.12rem; }
+    .coupon { margin-top: 0; margin-bottom: .65rem; }
+    .coupon code { padding: .28rem .5rem; border: 1px dashed #ad6b00; border-radius: 5px; background: #fff5dc; font-weight: 800; }
+    .buy-section small { max-width: 680px; margin-top: .7rem; color: #6d746f; line-height: 1.45; }
     .buy-btn { display: inline-block; padding: 1rem 2.5rem; background: #ff9900; color: #111 !important; text-decoration: none; border-radius: 8px; font-size: 1.1rem; font-weight: 700; transition: background 0.2s; }
     .buy-btn:hover { background: #e68a00; }
     .back-link { display: inline-block; margin-bottom: 2rem; color: #888; font-size: 0.9rem; text-decoration: none; }
@@ -150,9 +155,13 @@ const articleJsonLd = {
 
       {post.affiliate_url && (
         <div class="buy-section">
+          {post.offer_text && <strong class="offer-text">{post.offer_text}</strong>}
+          {post.coupon_code && <p class="coupon">Cupom: <code>{post.coupon_code}</code></p>}
+          {post.offer_valid_until && <small>Oferta verificada até {new Date(post.offer_valid_until).toLocaleString('pt-BR')}</small>}
           <a href={post.affiliate_url} class="buy-btn" target="_blank" rel="nofollow sponsored">
-            🛒 Ver Preço na Amazon
+            {post.commerce_link_type === 'search' ? '🔎 Ver opções na Amazon' : post.commerce_link_type === 'offer' ? '🏷️ Conferir oferta na Amazon' : '🛒 Ver preço na Amazon'}
           </a>
+          <small>Como participante do Programa de Associados da Amazon, podemos receber comissão por compras qualificadas.</small>
         </div>
       )}
     </article>

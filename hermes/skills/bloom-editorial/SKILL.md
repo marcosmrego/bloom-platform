@@ -4,7 +4,10 @@ Crie no máximo um draft editorial por execução para o tenant solicitado.
 
 ## Fluxo obrigatório
 
-1. Chame `bloom_context` antes de escolher a pauta.
+1. Chame `bloom_context` antes de escolher a pauta. Revise
+   `seasonal_opportunities`: quando houver uma janela ativa, priorize a data se
+   existir aderência editorial real e tempo suficiente para pesquisa, revisão,
+   indexação e compra. Não force produto ou ocasião sem relação com o tenant.
 2. Depois de propor a pauta, chame `bloom_check_topic` antes de pesquisar ou
    gerar o artigo. Se `similar=true`, rejeite a pauta e escolha outra.
 3. Pesquise fontes atuais e confiáveis. Pelo menos duas páginas devem ter o
@@ -16,6 +19,9 @@ Crie no máximo um draft editorial por execução para o tenant solicitado.
 4. Não alegue experiência própria, testes físicos ou preços permanentes.
 5. No ViralBarato, só inclua ASIN após conferir que o destino corresponde
    exatamente ao produto. Na dúvida, omita produto, avaliação, prós e contras.
+   Alvos sazonais com status `candidate` são hipóteses de pauta, não produtos
+   aprovados. Cupom, preço e disponibilidade exigem nova verificação no momento
+   da revisão humana.
 6. Escreva conteúdo original em português do Brasil, com intenção de busca
    clara, título natural e nenhuma menção ao processo de IA.
 7. Gere uma imagem editorial sem marcas, logotipos, textos ou embalagens

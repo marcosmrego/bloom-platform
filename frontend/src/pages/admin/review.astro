@@ -95,6 +95,18 @@ export const prerender = false;
               <label class="full">Título<input name="title" required maxlength="500" /></label>
               <label>Categoria<input name="category_slug" placeholder="slug-da-categoria" /></label>
               <label>ASIN do produto<input name="product_asin" placeholder="Opcional" /></label>
+              <label>Destino comercial
+                <select name="commerce_link_type">
+                  <option value="">Sem destino adicional</option>
+                  <option value="product">Produto específico</option>
+                  <option value="search">Busca afiliada</option>
+                  <option value="offer">Oferta ou cupom</option>
+                </select>
+              </label>
+              <label class="full">URL afiliada final<input name="commerce_url" type="url" placeholder="https://www.amazon.com.br/...?tag=marcosmrego-20" /></label>
+              <label>Código do cupom<input name="coupon_code" placeholder="Opcional" /></label>
+              <label>Validade da oferta<input name="offer_valid_until" type="datetime-local" /></label>
+              <label class="full">Benefício ou condição da oferta<input name="offer_text" placeholder="Ex.: 10% de desconto com o cupom, sujeito à disponibilidade" /></label>
               <label class="full">Resumo<textarea name="excerpt" rows="3"></textarea></label>
               <label class="full">Conteúdo Markdown<textarea name="content" rows="24" required></textarea></label>
               <label class="full">URL da imagem<input name="image_url" /></label>
@@ -152,7 +164,7 @@ export const prerender = false;
       let openRequest = 0;
       let previewTimer: number | null = null;
 
-      const fields = ['title', 'excerpt', 'content', 'image_url', 'category_slug', 'product_asin', 'rating', 'seo_title', 'seo_description'];
+      const fields = ['title', 'excerpt', 'content', 'image_url', 'category_slug', 'product_asin', 'rating', 'seo_title', 'seo_description', 'commerce_link_type', 'commerce_url', 'coupon_code', 'offer_text', 'offer_valid_until'];
 
       function notify(message: string, error = false) {
         toast.textContent = message;
@@ -215,13 +227,16 @@ export const prerender = false;
 
       function renderMonetization(post: any) {
         const hasAffiliate = Boolean(post.product_asin && post.affiliate_url);
-        if (!hasAffiliate) {
+        const hasCommerceUrl = Boolean(post.commerce_url);
+        if (!hasAffiliate && !hasCommerceUrl) {
           monetization.innerHTML = `<div class="monetization-card inactive"><span>Sem link afiliado</span><div><strong>Nenhum produto está associado a este conteúdo.</strong><p>Não haverá botão de compra no artigo publicado. Associe e valide um ASIN somente quando o produto exato estiver confirmado.</p></div></div>`;
           return;
         }
         let tagValid = false;
         try { tagValid = new URL(post.affiliate_url).searchParams.get('tag') === 'marcosmrego-20'; } catch {}
-        monetization.innerHTML = `<div class="monetization-card active"><span>Link afiliado ativo</span><div><strong>${escapeHtml(post.product_title || 'Produto associado')}</strong><p>ASIN: <code>${escapeHtml(post.product_asin)}</code> · Tag: ${tagValid ? 'validada' : 'verificar'}</p><a href="${escapeHtml(post.affiliate_url)}" target="_blank" rel="noopener noreferrer nofollow sponsored">Abrir URL final da Amazon ↗</a></div></div>`;
+        const linkLabels: Record<string, string> = { product: 'Produto específico', search: 'Busca afiliada', offer: 'Oferta ou cupom' };
+        const offer = post.offer_text ? `<p><strong>Oferta:</strong> ${escapeHtml(post.offer_text)}${post.coupon_code ? ` · Cupom: <code>${escapeHtml(post.coupon_code)}</code>` : ''}${post.offer_valid_until ? ` · Até ${new Date(post.offer_valid_until).toLocaleString('pt-BR')}` : ''}</p>` : '';
+        monetization.innerHTML = `<div class="monetization-card active"><span>Link afiliado ativo</span><div><strong>${escapeHtml(post.product_title || linkLabels[post.commerce_link_type] || 'Destino comercial')}</strong><p>${post.product_asin ? `ASIN: <code>${escapeHtml(post.product_asin)}</code> · ` : ''}Tipo: ${escapeHtml(linkLabels[post.commerce_link_type] || 'Produto')} · Tag: ${tagValid ? 'validada' : 'verificar'}</p>${offer}<a href="${escapeHtml(post.affiliate_url)}" target="_blank" rel="noopener noreferrer nofollow sponsored">Abrir URL final da Amazon ↗</a></div></div>`;
       }
 
       async function loadPosts() {
@@ -259,7 +274,14 @@ export const prerender = false;
           document.querySelector('#post-excerpt')!.textContent = post.excerpt || '';
           for (const name of fields) {
             const input = form.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement;
-            if (input) input.value = post[name] ?? '';
+            if (input) {
+              let value = post[name];
+              if (name === 'offer_valid_until' && value) {
+                const instant = new Date(value);
+                value = new Date(instant.getTime() - instant.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+              }
+              input.value = value ?? '';
+            }
           }
           for (const name of ['tags', 'pros', 'cons']) (form.elements.namedItem(name) as HTMLInputElement).value = Array.isArray(post[name]) ? post[name].join(', ') : '';
           heroImage.src = resolveImageUrl(post.image_url, post.tenant_slug);
@@ -287,7 +309,14 @@ export const prerender = false;
       form.addEventListener('submit', async event => {
         event.preventDefault(); if (!selectedId) return;
         const data = new FormData(form); const payload: Record<string, unknown> = {};
-        for (const name of fields) { const value = String(data.get(name) || '').trim(); payload[name] = name === 'rating' ? (value ? Number(value) : null) : (value || null); }
+        for (const name of fields) {
+          const value = String(data.get(name) || '').trim();
+          payload[name] = name === 'rating'
+            ? (value ? Number(value) : null)
+            : name === 'offer_valid_until' && value
+              ? new Date(value).toISOString()
+              : (value || null);
+        }
         payload.tags = splitList(data.get('tags')); payload.pros = splitList(data.get('pros')); payload.cons = splitList(data.get('cons'));
         try { await api(`posts/${selectedId}`, { method: 'PATCH', body: JSON.stringify(payload), headers: { 'X-Reviewer': document.querySelector<HTMLInputElement>('#reviewer')!.value } }); notify('Alterações salvas.'); await openPost(selectedId); }
         catch (error) { notify((error as Error).message, true); }
