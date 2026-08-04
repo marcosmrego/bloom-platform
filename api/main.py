@@ -56,6 +56,7 @@ MEDIA_ROOT = Path(
 ).resolve()
 MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", str(10 * 1024 * 1024)))
 MAX_IMAGE_PIXELS = int(os.getenv("MAX_IMAGE_PIXELS", "12000000"))
+ANALYTICS_COLLECTION_STARTED = datetime(2026, 8, 4, tzinfo=timezone.utc)
 
 
 def slugify(value: str, max_length: int = SLUG_MAX_LENGTH) -> str:
@@ -179,14 +180,18 @@ def build_performance_alerts(
 
     for post in posts:
         published_at = post.get("published_at")
-        age_days = (current - published_at).days if published_at else 0
+        observable_since = max(
+            published_at or ANALYTICS_COLLECTION_STARTED,
+            ANALYTICS_COLLECTION_STARTED,
+        )
+        observed_days = (current - observable_since).days
         views = int(post.get("views") or 0)
         clicks = int(post.get("clicks") or 0)
         revenue = Decimal(str(post.get("revenue") or 0))
 
-        if not post.get("has_affiliate_link"):
+        if post.get("tenant_slug") == "viralbarato" and not post.get("has_affiliate_link"):
             add(post, "missing_affiliate", "medium", "Artigo sem link afiliado", "Revisar se existe um produto ou destino comercial adequado.")
-        if age_days >= 3 and views == 0:
+        if observed_days >= 3 and views == 0:
             add(post, "no_traffic", "medium", "Artigo sem tráfego após 3 dias", "Reforçar distribuição e verificar indexação e links internos.")
         if views >= 10 and clicks == 0:
             add(post, "no_clicks", "high", "Visitas sem clique afiliado", "Revisar relevância, posição e texto do CTA.")

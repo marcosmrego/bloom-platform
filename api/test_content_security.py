@@ -122,6 +122,20 @@ class PerformanceAlertTests(unittest.TestCase):
         self.assertNotIn("clicks_without_revenue", {item["code"] for item in without_finance})
         self.assertIn("clicks_without_revenue", {item["code"] for item in with_finance})
 
+    def test_does_not_call_old_posts_trafficless_before_tracking_baseline(self):
+        alerts = build_performance_alerts(
+            [self.post(views=0)], False, datetime(2026, 8, 4, tzinfo=timezone.utc)
+        )
+        self.assertNotIn("no_traffic", {item["code"] for item in alerts})
+
+    def test_missing_affiliate_is_commercial_tenant_only(self):
+        alerts = build_performance_alerts(
+            [self.post(tenant_slug="mundonoprato", has_affiliate_link=False, views=1)],
+            False,
+            datetime(2026, 8, 4, tzinfo=timezone.utc),
+        )
+        self.assertNotIn("missing_affiliate", {item["code"] for item in alerts})
+
 
 class ContentTokenTests(unittest.TestCase):
     def test_accepts_matching_bearer_token(self):
