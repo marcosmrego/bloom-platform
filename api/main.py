@@ -156,6 +156,56 @@ def analytics_host(value: Optional[str]) -> Optional[str]:
     return (parsed.hostname or "").lower()[:255] or None
 
 
+def build_performance_alerts(
+    posts: List[Dict[str, Any]],
+    finance_available: bool,
+    now: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    """Transforma métricas em ações conservadoras, sem alterar conteúdo."""
+    current = now or datetime.now(timezone.utc)
+    alerts: List[Dict[str, Any]] = []
+    priority_order = {"high": 0, "medium": 1, "low": 2}
+
+    def add(post, code, priority, title, action):
+        alerts.append({
+            "code": code,
+            "priority": priority,
+            "post_id": post["post_id"],
+            "tenant_slug": post["tenant_slug"],
+            "post_title": post["title"],
+            "title": title,
+            "action": action,
+        })
+
+    for post in posts:
+        published_at = post.get("published_at")
+        age_days = (current - published_at).days if published_at else 0
+        views = int(post.get("views") or 0)
+        clicks = int(post.get("clicks") or 0)
+        revenue = Decimal(str(post.get("revenue") or 0))
+
+        if not post.get("has_affiliate_link"):
+            add(post, "missing_affiliate", "medium", "Artigo sem link afiliado", "Revisar se existe um produto ou destino comercial adequado.")
+        if age_days >= 3 and views == 0:
+            add(post, "no_traffic", "medium", "Artigo sem tráfego após 3 dias", "Reforçar distribuição e verificar indexação e links internos.")
+        if views >= 10 and clicks == 0:
+            add(post, "no_clicks", "high", "Visitas sem clique afiliado", "Revisar relevância, posição e texto do CTA.")
+        elif views >= 20 and float(post.get("ctr") or 0) < 2:
+            add(post, "low_ctr", "medium", "CTR afiliado abaixo de 2%", "Testar CTA ou produto mais alinhado à intenção do artigo.")
+        if finance_available and clicks >= 3 and revenue == 0:
+            add(post, "clicks_without_revenue", "high", "Cliques sem receita registrada", "Conferir atribuição e relatório da plataforma afiliada.")
+
+        valid_until = post.get("offer_valid_until")
+        if valid_until:
+            remaining = (valid_until - current).total_seconds()
+            if remaining <= 0:
+                add(post, "offer_expired", "high", "Oferta ou cupom expirado", "Validar uma nova oferta ou remover o destaque promocional.")
+            elif remaining <= 3 * 86400:
+                add(post, "offer_expiring", "medium", "Oferta vence em até 3 dias", "Revalidar preço, cupom e disponibilidade antes do vencimento.")
+
+    return sorted(alerts, key=lambda item: (priority_order[item["priority"]], item["post_id"], item["code"]))
+
+
 def post_request_hash(data: "PostCreate") -> str:
     payload = json.dumps(
         data.model_dump(mode="json"),
@@ -1121,7 +1171,7 @@ async def get_editorial_metrics(
             params: List[Any] = [period_days, period_days, period_days]
             tenant_filter = ""
             if tslug:
-                tenant_filter = "AND t.slug = %s"
+                tenant_filter = "AND p.tenant_slug = %s"
                 params.append(tslug)
             cur.execute(
                 f"""
@@ -1145,8 +1195,9 @@ async def get_editorial_metrics(
                       AND post_id IS NOT NULL
                     GROUP BY tenant_id, post_id
                 )
-                SELECT p.id AS post_id, t.slug AS tenant_slug, t.name AS tenant_name,
-                       p.title, p.slug, p.published_at,
+                SELECT p.id AS post_id, p.tenant_slug, p.tenant_name,
+                       p.title, p.slug, p.published_at, p.affiliate_url IS NOT NULL AS has_affiliate_link,
+                       p.offer_valid_until,
                        COALESCE(v.views, 0) AS views,
                        COALESCE(c.clicks, 0) AS clicks,
                        CASE WHEN COALESCE(v.views, 0) = 0 THEN 0
@@ -1155,8 +1206,7 @@ async def get_editorial_metrics(
                        COALESCE(f.revenue, 0) AS revenue,
                        COALESCE(f.cost, 0) AS cost,
                        COALESCE(f.revenue, 0) - COALESCE(f.cost, 0) AS result
-                FROM posts p
-                JOIN tenants t ON t.id = p.tenant_id
+                FROM vw_posts_enriched p
                 LEFT JOIN view_totals v ON v.tenant_id = p.tenant_id AND v.post_id = p.id
                 LEFT JOIN click_totals c ON c.tenant_id = p.tenant_id AND c.post_id = p.id
                 LEFT JOIN finance_totals f ON f.tenant_id = p.tenant_id AND f.post_id = p.id
@@ -1218,12 +1268,20 @@ async def get_editorial_metrics(
             brl_revenue = sum((row["revenue"] or Decimal("0")) for row in finance_rows if row["currency"] == "BRL")
             brl_cost = sum((row["cost"] or Decimal("0")) for row in finance_rows if row["currency"] == "BRL")
             brl_unattributed = sum((row["unattributed_revenue"] or Decimal("0")) for row in finance_rows if row["currency"] == "BRL")
+            alerts = build_performance_alerts(posts, bool(finance_rows))
             return {
                 "period_days": period_days,
                 "tenant_slug": tslug,
                 "summary": summary,
                 "posts": posts,
                 "sources": sources,
+                "alerts": alerts,
+                "alert_summary": {
+                    "total": len(alerts),
+                    "high": sum(1 for alert in alerts if alert["priority"] == "high"),
+                    "medium": sum(1 for alert in alerts if alert["priority"] == "medium"),
+                    "low": sum(1 for alert in alerts if alert["priority"] == "low"),
+                },
                 "finance": {
                     "status": "available" if finance_rows else "awaiting_import",
                     "currency": "BRL",

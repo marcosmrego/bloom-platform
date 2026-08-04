@@ -1,5 +1,6 @@
 import unittest
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from io import BytesIO
 from unittest.mock import patch
@@ -23,6 +24,7 @@ from main import (
     validate_idempotency_key,
     FinancialEntryCreate,
     FinancialImportCreate,
+    build_performance_alerts,
 )
 
 
@@ -74,6 +76,51 @@ class FinancialImportValidationTests(unittest.TestCase):
                         external_id="valid-id",
                         **values,
                     )
+
+
+class PerformanceAlertTests(unittest.TestCase):
+    def post(self, **overrides):
+        values = {
+            "post_id": 58,
+            "tenant_slug": "viralbarato",
+            "title": "Artigo em observação",
+            "published_at": datetime(2026, 8, 1, tzinfo=timezone.utc),
+            "has_affiliate_link": True,
+            "offer_valid_until": None,
+            "views": 12,
+            "clicks": 0,
+            "ctr": 0,
+            "revenue": 0,
+        }
+        values.update(overrides)
+        return values
+
+    def test_prioritizes_visits_without_clicks(self):
+        alerts = build_performance_alerts(
+            [self.post()], False, datetime(2026, 8, 4, tzinfo=timezone.utc)
+        )
+        self.assertEqual(alerts[0]["code"], "no_clicks")
+        self.assertEqual(alerts[0]["priority"], "high")
+
+    def test_flags_expiring_offer_and_missing_affiliate(self):
+        now = datetime(2026, 8, 4, tzinfo=timezone.utc)
+        alerts = build_performance_alerts(
+            [self.post(
+                views=1,
+                has_affiliate_link=False,
+                offer_valid_until=now + timedelta(days=2),
+            )],
+            False,
+            now,
+        )
+        self.assertEqual({item["code"] for item in alerts}, {"missing_affiliate", "offer_expiring"})
+
+    def test_financial_alert_requires_available_finance_data(self):
+        post = self.post(views=20, clicks=4, ctr=20)
+        without_finance = build_performance_alerts([post], False)
+        with_finance = build_performance_alerts([post], True)
+        self.assertNotIn("clicks_without_revenue", {item["code"] for item in without_finance})
+        self.assertIn("clicks_without_revenue", {item["code"] for item in with_finance})
 
 
 class ContentTokenTests(unittest.TestCase):

@@ -47,6 +47,15 @@ export const prerender = false;
       .importer button { background: #172033; color: white; cursor: pointer; }
       .importer .full { grid-column: 1 / -1; }
       .hint { color: #6d7890; font-size: .82rem; }
+      .alerts { margin-top: 1rem; }
+      .alert-list { display: grid; gap: .65rem; }
+      .alert { display: grid; grid-template-columns: auto 1fr; gap: .7rem; padding: .8rem; border: 1px solid #e4e8f0; border-left-width: 4px; border-radius: 9px; }
+      .alert.high { border-left-color: #c73737; background: #fff7f7; }
+      .alert.medium { border-left-color: #d58b16; background: #fffbf2; }
+      .alert.low { border-left-color: #4d6fb3; background: #f7f9ff; }
+      .alert-badge { font-size: .68rem; font-weight: 700; text-transform: uppercase; }
+      .alert strong, .alert small { display: block; }
+      .alert small { margin-top: .2rem; color: #667188; }
       @media (max-width: 900px) { .cards { grid-template-columns: repeat(2, 1fr); } .layout { grid-template-columns: 1fr; } }
     </style>
   </head>
@@ -68,6 +77,10 @@ export const prerender = false;
         <article class="card"><span>Receita</span><strong id="revenue">—</strong><small id="finance-status">aguardando importação</small></article>
         <article class="card"><span>Custos</span><strong id="cost">—</strong></article>
         <article class="card"><span>Resultado</span><strong id="result">—</strong></article>
+      </section>
+      <section class="panel alerts">
+        <h2>Alertas e ações recomendadas <span id="alert-count" class="tenant">0</span></h2>
+        <div id="alert-list" class="alert-list"></div>
       </section>
       <section class="panel importer">
         <h2>Importar receita ou custo</h2>
@@ -111,6 +124,10 @@ export const prerender = false;
         document.querySelector('#finance-status').textContent = data.finance.status === 'available'
           ? `${money.format(Number(data.finance.unattributed_revenue))} sem atribuição a artigo`
           : 'aguardando importação';
+        document.querySelector('#alert-count').textContent = number.format(data.alert_summary.total);
+        document.querySelector('#alert-list').innerHTML = data.alerts.length
+          ? data.alerts.map((item) => `<article class="alert ${escapeHtml(item.priority)}"><span class="alert-badge">${item.priority === 'high' ? 'Alta' : item.priority === 'medium' ? 'Média' : 'Baixa'}</span><div><strong>${escapeHtml(item.title)} · ${escapeHtml(item.post_title)}</strong><small>${escapeHtml(item.action)}</small></div></article>`).join('')
+          : '<div class="empty">Nenhuma ação necessária com os dados atuais.</div>';
         const rows = document.querySelector('#rows');
         rows.innerHTML = data.posts.map((post) => `<tr><td class="post-title">${escapeHtml(post.title)}</td><td><span class="tenant">${escapeHtml(post.tenant_name)}</span></td><td class="numeric">${number.format(post.views)}</td><td class="numeric">${number.format(post.clicks)}</td><td class="numeric">${Number(post.ctr).toLocaleString('pt-BR')}%</td><td class="numeric">${money.format(Number(post.revenue))}</td><td class="numeric">${money.format(Number(post.result))}</td></tr>`).join('');
         document.querySelector('#empty').hidden = data.posts.length > 0;
