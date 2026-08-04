@@ -21,6 +21,8 @@ from main import (
     validate_editorial_sources,
     validate_editorial_structure,
     validate_idempotency_key,
+    FinancialEntryCreate,
+    FinancialImportCreate,
 )
 
 
@@ -41,6 +43,37 @@ class AnalyticsValidationTests(unittest.TestCase):
         self.assertEqual(analytics_host("https://TikTok.com/path?q=1"), "tiktok.com")
         self.assertIsNone(analytics_host("not-a-url"))
         self.assertEqual(clean_analytics_value("  social\x00media  "), "socialmedia")
+
+
+class FinancialImportValidationTests(unittest.TestCase):
+    def test_accepts_real_financial_entry(self):
+        payload = FinancialImportCreate(
+            tenant_slug="viralbarato",
+            entries=[FinancialEntryCreate(
+                provider="amazon",
+                entry_type="revenue",
+                occurred_on="2026-08-04",
+                amount="12.34",
+                external_id="amazon-order-123",
+                post_id=58,
+            )],
+        )
+        self.assertEqual(payload.entries[0].currency, "BRL")
+        self.assertEqual(str(payload.entries[0].amount), "12.34")
+
+    def test_rejects_negative_amount_or_unknown_provider(self):
+        invalid = [
+            {"provider": "amazon", "entry_type": "revenue", "amount": "-1"},
+            {"provider": "unknown", "entry_type": "revenue", "amount": "1"},
+        ]
+        for values in invalid:
+            with self.subTest(values=values):
+                with self.assertRaises(Exception):
+                    FinancialEntryCreate(
+                        occurred_on="2026-08-04",
+                        external_id="valid-id",
+                        **values,
+                    )
 
 
 class ContentTokenTests(unittest.TestCase):

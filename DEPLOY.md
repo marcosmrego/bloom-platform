@@ -54,6 +54,14 @@ ADS_TXT_EXTRA=linhas_ads_txt_fornecidas_pelas_redes
 # - Artigos enviam visitas pseudonimizadas para /api/analytics/page-view.
 # - CTAs afiliados usam /go/{post_id}; o servidor resolve o destino e registra o clique.
 # - O painel protegido fica em /admin/metrics e usa o acesso editorial.
+# - Receitas e custos reais podem ser registrados no próprio painel. Cada
+#   lançamento exige fonte, data, valor e um ID externo idempotente; o post é
+#   opcional. Reimportar o mesmo ID atualiza a linha em vez de duplicá-la.
+# - Antes de ativar o painel financeiro, aplique:
+#   psql "$DATABASE_URL" -f scripts/migrate_financial_metrics.sql
+# - Valores sem post aparecem como receita não atribuída. Não distribua receita
+#   estimada entre artigos: atribua somente quando o relatório trouxer uma chave
+#   confiável para essa associação.
 # - Aplique scripts/migrate_analytics_funnel.sql antes deste deploy.
 
 ## Ordem de migração de uma instalação existente

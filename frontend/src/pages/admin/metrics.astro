@@ -21,7 +21,7 @@ export const prerender = false;
       label { display: grid; gap: .3rem; font-size: .75rem; color: #cdd5e4; }
       select { min-width: 130px; padding: .6rem .75rem; border: 1px solid #47536a; border-radius: 8px; background: #242f45; color: white; }
       main { padding: 1.5rem clamp(1rem, 4vw, 3rem) 3rem; max-width: 1500px; margin: auto; }
-      .cards { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 1rem; }
+      .cards { display: grid; grid-template-columns: repeat(7, minmax(140px, 1fr)); gap: 1rem; }
       .card, .panel { background: white; border: 1px solid #dfe4ed; border-radius: 14px; box-shadow: 0 4px 14px rgba(28, 39, 60, .05); }
       .card { padding: 1.1rem; }
       .card span { color: #6d7890; font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
@@ -40,6 +40,13 @@ export const prerender = false;
       .sources { list-style: none; padding: 0; margin: 0; }
       .sources li { display: flex; justify-content: space-between; gap: 1rem; padding: .7rem 0; border-bottom: 1px solid #edf0f5; }
       .empty { color: #768198; padding: 2rem; text-align: center; }
+      .importer { margin-top: 1rem; }
+      .importer form { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: .75rem; align-items: end; }
+      .importer label { color: #59657b; }
+      .importer input, .importer select, .importer button { width: 100%; padding: .65rem .75rem; border: 1px solid #ccd4e1; border-radius: 8px; background: white; color: #172033; }
+      .importer button { background: #172033; color: white; cursor: pointer; }
+      .importer .full { grid-column: 1 / -1; }
+      .hint { color: #6d7890; font-size: .82rem; }
       @media (max-width: 900px) { .cards { grid-template-columns: repeat(2, 1fr); } .layout { grid-template-columns: 1fr; } }
     </style>
   </head>
@@ -58,10 +65,27 @@ export const prerender = false;
         <article class="card"><span>Visitas identificadas</span><strong id="views">—</strong><small>sessões únicas por artigo/dia</small></article>
         <article class="card"><span>Cliques afiliados</span><strong id="clicks">—</strong></article>
         <article class="card"><span>CTR afiliado</span><strong id="ctr">—</strong></article>
-        <article class="card"><span>Receita</span><strong>—</strong><small>integração pendente</small></article>
+        <article class="card"><span>Receita</span><strong id="revenue">—</strong><small id="finance-status">aguardando importação</small></article>
+        <article class="card"><span>Custos</span><strong id="cost">—</strong></article>
+        <article class="card"><span>Resultado</span><strong id="result">—</strong></article>
+      </section>
+      <section class="panel importer">
+        <h2>Importar receita ou custo</h2>
+        <form id="financial-form">
+          <label>Tenant<select name="tenant_slug" required><option value="viralbarato">ViralBarato</option><option value="mundonoprato">Mundo no Prato</option></select></label>
+          <label>Fonte<select name="provider" required><option value="amazon">Amazon</option><option value="adsense">AdSense</option><option value="adcash">Adcash</option><option value="manual">Manual</option></select></label>
+          <label>Tipo<select name="entry_type" required><option value="revenue">Receita</option><option value="cost">Custo</option></select></label>
+          <label>Data<input name="occurred_on" type="date" required /></label>
+          <label>Valor (BRL)<input name="amount" type="number" min="0" step="0.01" required /></label>
+          <label>ID externo único<input name="external_id" maxlength="200" required placeholder="pedido, linha ou período" /></label>
+          <label>Post ID (opcional)<input name="post_id" type="number" min="1" /></label>
+          <label>Descrição<input name="description" maxlength="500" /></label>
+          <div class="full"><button type="submit">Salvar lançamento</button></div>
+          <p id="import-status" class="hint full">Use o identificador do relatório para que uma reimportação atualize o lançamento, sem duplicá-lo.</p>
+        </form>
       </section>
       <section class="layout">
-        <article class="panel"><h2>Desempenho por artigo</h2><div class="table-wrap"><table><thead><tr><th>Artigo</th><th>Tenant</th><th class="numeric">Visitas</th><th class="numeric">Cliques</th><th class="numeric">CTR</th></tr></thead><tbody id="rows"></tbody></table></div><div id="empty" class="empty" hidden>Nenhum artigo encontrado.</div></article>
+        <article class="panel"><h2>Desempenho por artigo</h2><div class="table-wrap"><table><thead><tr><th>Artigo</th><th>Tenant</th><th class="numeric">Visitas</th><th class="numeric">Cliques</th><th class="numeric">CTR</th><th class="numeric">Receita</th><th class="numeric">Resultado</th></tr></thead><tbody id="rows"></tbody></table></div><div id="empty" class="empty" hidden>Nenhum artigo encontrado.</div></article>
         <aside class="panel"><h2>Principais origens</h2><ul id="sources" class="sources"></ul></aside>
       </section>
     </main>
@@ -70,6 +94,7 @@ export const prerender = false;
       const days = document.querySelector('#days');
       const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
       const number = new Intl.NumberFormat('pt-BR');
+      const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
       async function load() {
         const query = new URLSearchParams({ days: days.value });
         if (tenant.value) query.set('tenant_slug', tenant.value);
@@ -80,8 +105,14 @@ export const prerender = false;
         document.querySelector('#views').textContent = number.format(data.summary.views);
         document.querySelector('#clicks').textContent = number.format(data.summary.clicks);
         document.querySelector('#ctr').textContent = `${Number(data.summary.ctr).toLocaleString('pt-BR')}%`;
+        document.querySelector('#revenue').textContent = money.format(Number(data.finance.revenue));
+        document.querySelector('#cost').textContent = money.format(Number(data.finance.cost));
+        document.querySelector('#result').textContent = money.format(Number(data.finance.result));
+        document.querySelector('#finance-status').textContent = data.finance.status === 'available'
+          ? `${money.format(Number(data.finance.unattributed_revenue))} sem atribuição a artigo`
+          : 'aguardando importação';
         const rows = document.querySelector('#rows');
-        rows.innerHTML = data.posts.map((post) => `<tr><td class="post-title">${escapeHtml(post.title)}</td><td><span class="tenant">${escapeHtml(post.tenant_name)}</span></td><td class="numeric">${number.format(post.views)}</td><td class="numeric">${number.format(post.clicks)}</td><td class="numeric">${Number(post.ctr).toLocaleString('pt-BR')}%</td></tr>`).join('');
+        rows.innerHTML = data.posts.map((post) => `<tr><td class="post-title">${escapeHtml(post.title)}</td><td><span class="tenant">${escapeHtml(post.tenant_name)}</span></td><td class="numeric">${number.format(post.views)}</td><td class="numeric">${number.format(post.clicks)}</td><td class="numeric">${Number(post.ctr).toLocaleString('pt-BR')}%</td><td class="numeric">${money.format(Number(post.revenue))}</td><td class="numeric">${money.format(Number(post.result))}</td></tr>`).join('');
         document.querySelector('#empty').hidden = data.posts.length > 0;
         document.querySelector('#sources').innerHTML = data.sources.length
           ? data.sources.map((source) => `<li><span>${escapeHtml(source.source)}</span><strong>${number.format(source.views)}</strong></li>`).join('')
@@ -89,6 +120,38 @@ export const prerender = false;
       }
       tenant.addEventListener('change', () => load().catch(alert));
       days.addEventListener('change', () => load().catch(alert));
+      const financialForm = document.querySelector('#financial-form');
+      financialForm.querySelector('[name="occurred_on"]').value = new Date().toISOString().slice(0, 10);
+      financialForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const values = Object.fromEntries(new FormData(financialForm));
+        const status = document.querySelector('#import-status');
+        const entry = {
+          provider: values.provider,
+          entry_type: values.entry_type,
+          occurred_on: values.occurred_on,
+          amount: Number(values.amount),
+          currency: 'BRL',
+          external_id: values.external_id,
+          description: values.description || null,
+          post_id: values.post_id ? Number(values.post_id) : null,
+        };
+        status.textContent = 'Salvando...';
+        const response = await fetch('/api/editorial/revenue/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tenant_slug: values.tenant_slug, entries: [entry] }),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          status.textContent = result.detail || 'Falha ao importar lançamento.';
+          return;
+        }
+        status.textContent = result.inserted ? 'Lançamento incluído.' : 'Lançamento existente atualizado.';
+        financialForm.querySelector('[name="amount"]').value = '';
+        financialForm.querySelector('[name="external_id"]').value = '';
+        await load();
+      });
       load().catch((error) => alert(error.message));
     </script>
   </body>

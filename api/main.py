@@ -16,6 +16,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 import psycopg2
 import psycopg2.extras
@@ -568,6 +569,23 @@ class AffiliateClickCreate(AnalyticsAttribution):
     post_id: int
 
 
+class FinancialEntryCreate(BaseModel):
+    provider: Literal["amazon", "adsense", "adcash", "manual"]
+    entry_type: Literal["revenue", "cost"]
+    occurred_on: date
+    amount: Decimal = Field(ge=0, max_digits=14, decimal_places=4)
+    currency: str = "BRL"
+    external_id: str = Field(min_length=3, max_length=200)
+    post_id: Optional[int] = None
+    description: Optional[str] = Field(default=None, max_length=500)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class FinancialImportCreate(BaseModel):
+    tenant_slug: str
+    entries: List[FinancialEntryCreate] = Field(min_length=1, max_length=1000)
+
+
 class PaginatedResponse(BaseModel):
     items: List[Any]
     total: int
@@ -1100,7 +1118,7 @@ async def get_editorial_metrics(
         conn = get_db()
         try:
             cur = conn.cursor()
-            params: List[Any] = [period_days, period_days]
+            params: List[Any] = [period_days, period_days, period_days]
             tenant_filter = ""
             if tslug:
                 tenant_filter = "AND t.slug = %s"
@@ -1118,6 +1136,14 @@ async def get_editorial_metrics(
                     WHERE created_at >= NOW() - (%s * INTERVAL '1 day')
                       AND post_id IS NOT NULL
                     GROUP BY tenant_id, post_id
+                ), finance_totals AS (
+                    SELECT tenant_id, post_id,
+                           SUM(amount) FILTER (WHERE entry_type = 'revenue' AND currency = 'BRL') AS revenue,
+                           SUM(amount) FILTER (WHERE entry_type = 'cost' AND currency = 'BRL') AS cost
+                    FROM financial_entries
+                    WHERE occurred_on >= CURRENT_DATE - (%s * INTERVAL '1 day')
+                      AND post_id IS NOT NULL
+                    GROUP BY tenant_id, post_id
                 )
                 SELECT p.id AS post_id, t.slug AS tenant_slug, t.name AS tenant_name,
                        p.title, p.slug, p.published_at,
@@ -1125,11 +1151,15 @@ async def get_editorial_metrics(
                        COALESCE(c.clicks, 0) AS clicks,
                        CASE WHEN COALESCE(v.views, 0) = 0 THEN 0
                             ELSE ROUND((COALESCE(c.clicks, 0)::numeric / v.views) * 100, 2)
-                       END AS ctr
+                       END AS ctr,
+                       COALESCE(f.revenue, 0) AS revenue,
+                       COALESCE(f.cost, 0) AS cost,
+                       COALESCE(f.revenue, 0) - COALESCE(f.cost, 0) AS result
                 FROM posts p
                 JOIN tenants t ON t.id = p.tenant_id
                 LEFT JOIN view_totals v ON v.tenant_id = p.tenant_id AND v.post_id = p.id
                 LEFT JOIN click_totals c ON c.tenant_id = p.tenant_id AND c.post_id = p.id
+                LEFT JOIN finance_totals f ON f.tenant_id = p.tenant_id AND f.post_id = p.id
                 WHERE p.status = 'published' {tenant_filter}
                 ORDER BY views DESC, clicks DESC, p.published_at DESC NULLS LAST
                 """,
@@ -1164,18 +1194,124 @@ async def get_editorial_metrics(
                 """,
                 source_params,
             )
+            sources = [dict(row) for row in cur.fetchall()]
+            finance_params: List[Any] = [period_days]
+            finance_filter = ""
+            if tslug:
+                finance_filter = "AND t.slug = %s"
+                finance_params.append(tslug)
+            cur.execute(
+                f"""
+                SELECT fe.provider, fe.currency,
+                       SUM(fe.amount) FILTER (WHERE fe.entry_type = 'revenue') AS revenue,
+                       SUM(fe.amount) FILTER (WHERE fe.entry_type = 'cost') AS cost,
+                       SUM(fe.amount) FILTER (WHERE fe.post_id IS NULL AND fe.entry_type = 'revenue') AS unattributed_revenue
+                FROM financial_entries fe
+                JOIN tenants t ON t.id = fe.tenant_id
+                WHERE fe.occurred_on >= CURRENT_DATE - (%s * INTERVAL '1 day') {finance_filter}
+                GROUP BY fe.provider, fe.currency
+                ORDER BY fe.provider, fe.currency
+                """,
+                finance_params,
+            )
+            finance_rows = [dict(row) for row in cur.fetchall()]
+            brl_revenue = sum((row["revenue"] or Decimal("0")) for row in finance_rows if row["currency"] == "BRL")
+            brl_cost = sum((row["cost"] or Decimal("0")) for row in finance_rows if row["currency"] == "BRL")
+            brl_unattributed = sum((row["unattributed_revenue"] or Decimal("0")) for row in finance_rows if row["currency"] == "BRL")
             return {
                 "period_days": period_days,
                 "tenant_slug": tslug,
                 "summary": summary,
                 "posts": posts,
-                "sources": [dict(row) for row in cur.fetchall()],
-                "revenue": {"status": "not_integrated", "amount": None},
+                "sources": sources,
+                "finance": {
+                    "status": "available" if finance_rows else "awaiting_import",
+                    "currency": "BRL",
+                    "revenue": brl_revenue,
+                    "cost": brl_cost,
+                    "result": brl_revenue - brl_cost,
+                    "unattributed_revenue": brl_unattributed,
+                    "providers": finance_rows,
+                },
             }
         finally:
             conn.close()
 
     return await run_db_task(_sync, tenant_slug, days)
+
+
+@app.post("/api/v1/editorial/review/revenue/import")
+async def import_financial_entries(
+    data: FinancialImportCreate,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_review_token(authorization)
+
+    def _sync(payload: FinancialImportCreate):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM tenants WHERE slug = %s AND status = 'active'", (payload.tenant_slug,))
+            tenant = cur.fetchone()
+            if not tenant:
+                raise HTTPException(status_code=404, detail="Tenant not found")
+            tenant_id = tenant["id"]
+            post_ids = {entry.post_id for entry in payload.entries if entry.post_id is not None}
+            if post_ids:
+                cur.execute(
+                    "SELECT id FROM posts WHERE tenant_id = %s AND id = ANY(%s)",
+                    (tenant_id, list(post_ids)),
+                )
+                found = {row["id"] for row in cur.fetchall()}
+                missing = sorted(post_ids - found)
+                if missing:
+                    raise HTTPException(status_code=422, detail=f"Posts do not belong to tenant: {missing}")
+            inserted = 0
+            updated = 0
+            for entry in payload.entries:
+                currency = entry.currency.strip().upper()
+                if not re.fullmatch(r"[A-Z]{3}", currency):
+                    raise HTTPException(status_code=422, detail="Currency must be a three-letter ISO code")
+                cur.execute(
+                    """
+                    INSERT INTO financial_entries
+                        (tenant_id, post_id, provider, entry_type, occurred_on, amount,
+                         currency, external_id, description, metadata)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                    ON CONFLICT (tenant_id, provider, external_id) DO UPDATE SET
+                        post_id = EXCLUDED.post_id,
+                        entry_type = EXCLUDED.entry_type,
+                        occurred_on = EXCLUDED.occurred_on,
+                        amount = EXCLUDED.amount,
+                        currency = EXCLUDED.currency,
+                        description = EXCLUDED.description,
+                        metadata = EXCLUDED.metadata,
+                        imported_at = NOW()
+                    RETURNING (xmax = 0) AS inserted
+                    """,
+                    (
+                        tenant_id, entry.post_id, entry.provider, entry.entry_type,
+                        entry.occurred_on, entry.amount, currency, entry.external_id.strip(),
+                        entry.description, json.dumps(entry.metadata, ensure_ascii=False),
+                    ),
+                )
+                if cur.fetchone()["inserted"]:
+                    inserted += 1
+                else:
+                    updated += 1
+            conn.commit()
+            return {"status": "imported", "inserted": inserted, "updated": updated, "total": len(payload.entries)}
+        except HTTPException:
+            conn.rollback()
+            raise
+        except Exception:
+            conn.rollback()
+            logging.exception("Financial import failed")
+            raise HTTPException(status_code=500, detail="Financial import failed")
+        finally:
+            conn.close()
+
+    return await run_db_task(_sync, data)
 
 
 @app.get("/api/v1/editorial/review/posts")
