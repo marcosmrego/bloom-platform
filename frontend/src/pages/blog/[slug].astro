@@ -158,7 +158,7 @@ const articleJsonLd = {
           {post.offer_text && <strong class="offer-text">{post.offer_text}</strong>}
           {post.coupon_code && <p class="coupon">Cupom: <code>{post.coupon_code}</code></p>}
           {post.offer_valid_until && <small>Oferta verificada até {new Date(post.offer_valid_until).toLocaleString('pt-BR')}</small>}
-          <a href={post.affiliate_url} class="buy-btn" target="_blank" rel="nofollow sponsored">
+          <a href={`/go/${post.id}`} class="buy-btn" data-affiliate-link target="_blank" rel="nofollow sponsored">
             {post.commerce_link_type === 'search' ? '🔎 Ver opções na Amazon' : post.commerce_link_type === 'offer' ? '🏷️ Conferir oferta na Amazon' : '🛒 Ver preço na Amazon'}
           </a>
           <small>Como participante do Programa de Associados da Amazon, podemos receber comissão por compras qualificadas.</small>
@@ -170,5 +170,57 @@ const articleJsonLd = {
   </main>
 
   <SiteFooter config={tenantConfig} />
+  <script is:inline define:vars={{ postId: post.id }}>
+    (() => {
+      const storageKey = 'bloom_analytics_session';
+      let sessionId = localStorage.getItem(storageKey);
+      if (!sessionId) {
+        sessionId = globalThis.crypto?.randomUUID?.()
+          || `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+        localStorage.setItem(storageKey, sessionId);
+      }
+
+      const params = new URLSearchParams(location.search);
+      const attribution = {};
+      for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term']) {
+        attribution[key] = params.get(key);
+      }
+      const payload = {
+        post_id: postId,
+        session_id: sessionId,
+        path: location.pathname,
+        source_url: location.href,
+        referrer: document.referrer || null,
+        ...attribution,
+      };
+      const body = JSON.stringify(payload);
+      if (!navigator.sendBeacon('/api/analytics/page-view', new Blob([body], { type: 'application/json' }))) {
+        fetch('/api/analytics/page-view', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true,
+        }).catch(() => {});
+      }
+
+      const affiliateLink = document.querySelector('[data-affiliate-link]');
+      const prepareAffiliateLink = () => {
+        if (!(affiliateLink instanceof HTMLAnchorElement)) return;
+        const outbound = new URL(affiliateLink.href);
+        outbound.searchParams.set('sid', sessionId);
+        if (document.referrer) outbound.searchParams.set('referrer', document.referrer);
+        for (const [key, value] of Object.entries(attribution)) {
+          if (value) outbound.searchParams.set(key, value);
+        }
+        affiliateLink.href = outbound.toString();
+      };
+      affiliateLink?.addEventListener('pointerdown', prepareAffiliateLink);
+      affiliateLink?.addEventListener('click', () => {
+        prepareAffiliateLink();
+        globalThis.gtag?.('event', 'affiliate_click', {
+          post_id: postId,
+          link_type: 'amazon',
+        });
+      });
+      prepareAffiliateLink();
+    })();
+  </script>
 </body>
 </html>

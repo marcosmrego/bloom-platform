@@ -50,6 +50,12 @@ ADS_TXT_EXTRA=linhas_ads_txt_fornecidas_pelas_redes
 # - Publique a mensagem de consentimento em Privacy & messaging.
 # - Valide /ads.txt em cada domínio.
 
+# Analytics first-party:
+# - Artigos enviam visitas pseudonimizadas para /api/analytics/page-view.
+# - CTAs afiliados usam /go/{post_id}; o servidor resolve o destino e registra o clique.
+# - O painel protegido fica em /admin/metrics e usa o acesso editorial.
+# - Aplique scripts/migrate_analytics_funnel.sql antes deste deploy.
+
 ## Ordem de migração de uma instalação existente
 ## ───────────────────────────────────────────────────
 # 1. Faça backup do PostgreSQL.

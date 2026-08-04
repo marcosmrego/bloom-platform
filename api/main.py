@@ -131,6 +131,30 @@ def validate_idempotency_key(value: Optional[str]) -> str:
     return key
 
 
+def analytics_session_hash(value: str) -> str:
+    """Pseudonimiza o identificador local sem persistir cookie ou IP bruto."""
+    session_id = (value or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._:-]{16,128}", session_id):
+        raise HTTPException(status_code=422, detail="Invalid analytics session")
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+
+
+def clean_analytics_value(value: Optional[str], max_length: int = 255) -> Optional[str]:
+    cleaned = re.sub(r"[\x00-\x1f\x7f]", "", (value or "").strip())
+    return cleaned[:max_length] or None
+
+
+def analytics_host(value: Optional[str]) -> Optional[str]:
+    cleaned = clean_analytics_value(value, 1000)
+    if not cleaned:
+        return None
+    try:
+        parsed = urlparse(cleaned)
+    except ValueError:
+        return None
+    return (parsed.hostname or "").lower()[:255] or None
+
+
 def post_request_hash(data: "PostCreate") -> str:
     payload = json.dumps(
         data.model_dump(mode="json"),
@@ -522,6 +546,26 @@ class PostReviewDecision(BaseModel):
     decision: str
     reviewer: str = "editor"
     note: Optional[str] = None
+
+
+class AnalyticsAttribution(BaseModel):
+    session_id: str
+    source_url: Optional[str] = None
+    referrer: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_content: Optional[str] = None
+    utm_term: Optional[str] = None
+
+
+class PageViewCreate(AnalyticsAttribution):
+    post_id: int
+    path: str
+
+
+class AffiliateClickCreate(AnalyticsAttribution):
+    post_id: int
 
 
 class PaginatedResponse(BaseModel):
@@ -1042,6 +1086,98 @@ def _review_post_query() -> str:
     """
 
 
+@app.get("/api/v1/editorial/review/metrics")
+async def get_editorial_metrics(
+    tenant_slug: Optional[str] = None,
+    days: int = 30,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_review_token(authorization)
+    if days not in {7, 30, 90}:
+        raise HTTPException(status_code=422, detail="Days must be 7, 30 or 90")
+
+    def _sync(tslug: Optional[str], period_days: int):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            params: List[Any] = [period_days, period_days]
+            tenant_filter = ""
+            if tslug:
+                tenant_filter = "AND t.slug = %s"
+                params.append(tslug)
+            cur.execute(
+                f"""
+                WITH view_totals AS (
+                    SELECT tenant_id, post_id, COUNT(*) AS views
+                    FROM page_views
+                    WHERE created_at >= NOW() - (%s * INTERVAL '1 day')
+                    GROUP BY tenant_id, post_id
+                ), click_totals AS (
+                    SELECT tenant_id, post_id, COUNT(*) AS clicks
+                    FROM clicks
+                    WHERE created_at >= NOW() - (%s * INTERVAL '1 day')
+                      AND post_id IS NOT NULL
+                    GROUP BY tenant_id, post_id
+                )
+                SELECT p.id AS post_id, t.slug AS tenant_slug, t.name AS tenant_name,
+                       p.title, p.slug, p.published_at,
+                       COALESCE(v.views, 0) AS views,
+                       COALESCE(c.clicks, 0) AS clicks,
+                       CASE WHEN COALESCE(v.views, 0) = 0 THEN 0
+                            ELSE ROUND((COALESCE(c.clicks, 0)::numeric / v.views) * 100, 2)
+                       END AS ctr
+                FROM posts p
+                JOIN tenants t ON t.id = p.tenant_id
+                LEFT JOIN view_totals v ON v.tenant_id = p.tenant_id AND v.post_id = p.id
+                LEFT JOIN click_totals c ON c.tenant_id = p.tenant_id AND c.post_id = p.id
+                WHERE p.status = 'published' {tenant_filter}
+                ORDER BY views DESC, clicks DESC, p.published_at DESC NULLS LAST
+                """,
+                params,
+            )
+            posts = [dict(row) for row in cur.fetchall()]
+            summary = {
+                "published_posts": len(posts),
+                "views": sum(row["views"] for row in posts),
+                "clicks": sum(row["clicks"] for row in posts),
+            }
+            summary["ctr"] = round(
+                (summary["clicks"] / summary["views"] * 100) if summary["views"] else 0,
+                2,
+            )
+
+            source_params: List[Any] = [period_days]
+            source_filter = ""
+            if tslug:
+                source_filter = "AND t.slug = %s"
+                source_params.append(tslug)
+            cur.execute(
+                f"""
+                SELECT COALESCE(NULLIF(pv.utm_source, ''), NULLIF(pv.referrer_host, ''), 'direct') AS source,
+                       COUNT(*) AS views
+                FROM page_views pv
+                JOIN tenants t ON t.id = pv.tenant_id
+                WHERE pv.created_at >= NOW() - (%s * INTERVAL '1 day') {source_filter}
+                GROUP BY source
+                ORDER BY views DESC, source
+                LIMIT 10
+                """,
+                source_params,
+            )
+            return {
+                "period_days": period_days,
+                "tenant_slug": tslug,
+                "summary": summary,
+                "posts": posts,
+                "sources": [dict(row) for row in cur.fetchall()],
+                "revenue": {"status": "not_integrated", "amount": None},
+            }
+        finally:
+            conn.close()
+
+    return await run_db_task(_sync, tenant_slug, days)
+
+
 @app.get("/api/v1/editorial/review/posts")
 async def list_review_posts(
     tenant_slug: Optional[str] = None,
@@ -1499,6 +1635,132 @@ async def upload_post_media(
     }
 
 # ── CLICKS ─────────────────────────────────────────
+def _analytics_fields(data: AnalyticsAttribution) -> Dict[str, Optional[str]]:
+    return {
+        "session_hash": analytics_session_hash(data.session_id),
+        "referrer_host": analytics_host(data.referrer),
+        "utm_source": clean_analytics_value(data.utm_source),
+        "utm_medium": clean_analytics_value(data.utm_medium),
+        "utm_campaign": clean_analytics_value(data.utm_campaign),
+        "utm_content": clean_analytics_value(data.utm_content),
+        "utm_term": clean_analytics_value(data.utm_term),
+    }
+
+
+@app.post("/api/v1/{tenant_slug}/analytics/page-view")
+async def register_page_view(tenant_slug: str, data: PageViewCreate):
+    fields = _analytics_fields(data)
+    path = clean_analytics_value(data.path, 500)
+    if not path or not path.startswith("/") or path.startswith("//"):
+        raise HTTPException(status_code=422, detail="Invalid analytics path")
+
+    def _sync(tslug: str, payload: PageViewCreate, normalized: Dict[str, Optional[str]], safe_path: str):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT p.id, p.tenant_id, t.domain
+                FROM posts p JOIN tenants t ON t.id = p.tenant_id
+                WHERE t.slug = %s AND p.id = %s AND p.status = 'published'
+                """,
+                (tslug, payload.post_id),
+            )
+            post = cur.fetchone()
+            if not post:
+                return {"error": "Published post not found"}, 404
+            source_host = analytics_host(payload.source_url)
+            if source_host and source_host not in {post["domain"], f"www.{post['domain']}"}:
+                return {"error": "Source URL does not match tenant"}, 422
+            cur.execute(
+                """
+                INSERT INTO page_views
+                    (tenant_id, post_id, session_hash, path, referrer_host,
+                     utm_source, utm_medium, utm_campaign, utm_content, utm_term)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (tenant_id, post_id, session_hash, view_date) DO NOTHING
+                RETURNING id
+                """,
+                (
+                    post["tenant_id"], payload.post_id, normalized["session_hash"],
+                    safe_path, normalized["referrer_host"], normalized["utm_source"],
+                    normalized["utm_medium"], normalized["utm_campaign"],
+                    normalized["utm_content"], normalized["utm_term"],
+                ),
+            )
+            inserted = bool(cur.fetchone())
+            conn.commit()
+            return {"status": "registered" if inserted else "deduplicated"}
+        except Exception:
+            conn.rollback()
+            logger.exception("Page view registration failed")
+            return {"error": "Analytics ingestion failed"}, 500
+        finally:
+            conn.close()
+
+    result = await run_db_task(_sync, tenant_slug, data, fields, path)
+    if isinstance(result, tuple):
+        raise HTTPException(status_code=result[1], detail=result[0]["error"])
+    return result
+
+
+@app.post("/api/v1/{tenant_slug}/analytics/affiliate-click")
+async def register_affiliate_click(tenant_slug: str, data: AffiliateClickCreate):
+    fields = _analytics_fields(data)
+
+    def _sync(tslug: str, payload: AffiliateClickCreate, normalized: Dict[str, Optional[str]]):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT p.id, p.tenant_id, p.product_id, t.domain,
+                       v.affiliate_url, COALESCE(v.commerce_link_type, 'product') AS link_type
+                FROM posts p
+                JOIN tenants t ON t.id = p.tenant_id
+                JOIN vw_posts_enriched v ON v.id = p.id AND v.tenant_id = p.tenant_id
+                WHERE t.slug = %s AND p.id = %s AND p.status = 'published'
+                """,
+                (tslug, payload.post_id),
+            )
+            post = cur.fetchone()
+            if not post or not post["affiliate_url"]:
+                return {"error": "Active affiliate destination not found"}, 404
+            source_host = analytics_host(payload.source_url)
+            if source_host and source_host not in {post["domain"], f"www.{post['domain']}"}:
+                return {"error": "Source URL does not match tenant"}, 422
+            cur.execute(
+                """
+                INSERT INTO clicks
+                    (tenant_id, product_id, post_id, link_type, source_url,
+                     session_hash, referrer_host, destination_host,
+                     utm_source, utm_medium, utm_campaign, utm_content, utm_term)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    post["tenant_id"], post["product_id"], payload.post_id,
+                    post["link_type"], clean_analytics_value(payload.source_url, 1000),
+                    normalized["session_hash"], normalized["referrer_host"],
+                    analytics_host(post["affiliate_url"]), normalized["utm_source"],
+                    normalized["utm_medium"], normalized["utm_campaign"],
+                    normalized["utm_content"], normalized["utm_term"],
+                ),
+            )
+            conn.commit()
+            return {"status": "registered", "destination_url": post["affiliate_url"]}
+        except Exception:
+            conn.rollback()
+            logger.exception("Affiliate click registration failed")
+            return {"error": "Analytics ingestion failed"}, 500
+        finally:
+            conn.close()
+
+    result = await run_db_task(_sync, tenant_slug, data, fields)
+    if isinstance(result, tuple):
+        raise HTTPException(status_code=result[1], detail=result[0]["error"])
+    return result
+
+
 @app.post("/api/v1/{tenant_slug}/clicks")
 async def register_click(
     tenant_slug: str,

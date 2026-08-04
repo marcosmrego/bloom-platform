@@ -9,6 +9,9 @@ from PIL import Image
 
 import main
 from main import (
+    analytics_host,
+    analytics_session_hash,
+    clean_analytics_value,
     PostCreate,
     SourceEvidence,
     editorial_similarity,
@@ -19,6 +22,25 @@ from main import (
     validate_editorial_structure,
     validate_idempotency_key,
 )
+
+
+class AnalyticsValidationTests(unittest.TestCase):
+    def test_hashes_valid_session_without_storing_identifier(self):
+        value = "550e8400-e29b-41d4-a716-446655440000"
+        hashed = analytics_session_hash(value)
+        self.assertEqual(len(hashed), 64)
+        self.assertNotIn(value, hashed)
+
+    def test_rejects_short_or_unsafe_session(self):
+        for value in ("short", "contains spaces and symbols!", ""):
+            with self.subTest(value=value):
+                with self.assertRaises(HTTPException):
+                    analytics_session_hash(value)
+
+    def test_normalizes_attribution_and_hosts(self):
+        self.assertEqual(analytics_host("https://TikTok.com/path?q=1"), "tiktok.com")
+        self.assertIsNone(analytics_host("not-a-url"))
+        self.assertEqual(clean_analytics_value("  social\x00media  "), "socialmedia")
 
 
 class ContentTokenTests(unittest.TestCase):

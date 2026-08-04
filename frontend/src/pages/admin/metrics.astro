@@ -1,0 +1,95 @@
+---
+export const prerender = false;
+---
+
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    <title>Métricas · Bloom</title>
+    <style>
+      :root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #172033; background: #f3f5f9; }
+      * { box-sizing: border-box; }
+      body { margin: 0; }
+      header { padding: 1.2rem clamp(1rem, 4vw, 3rem); background: #172033; color: white; display: flex; gap: 1.5rem; align-items: end; justify-content: space-between; flex-wrap: wrap; }
+      header h1 { margin: .2rem 0 0; font-size: 1.7rem; }
+      header p { margin: 0; color: #aeb8cc; font-size: .85rem; text-transform: uppercase; letter-spacing: .08em; }
+      header a { color: white; }
+      .filters { display: flex; gap: .7rem; flex-wrap: wrap; }
+      label { display: grid; gap: .3rem; font-size: .75rem; color: #cdd5e4; }
+      select { min-width: 130px; padding: .6rem .75rem; border: 1px solid #47536a; border-radius: 8px; background: #242f45; color: white; }
+      main { padding: 1.5rem clamp(1rem, 4vw, 3rem) 3rem; max-width: 1500px; margin: auto; }
+      .cards { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 1rem; }
+      .card, .panel { background: white; border: 1px solid #dfe4ed; border-radius: 14px; box-shadow: 0 4px 14px rgba(28, 39, 60, .05); }
+      .card { padding: 1.1rem; }
+      .card span { color: #6d7890; font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
+      .card strong { display: block; margin-top: .35rem; font-size: 1.8rem; }
+      .card small { color: #8b95a8; }
+      .layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(230px, 1fr); gap: 1rem; margin-top: 1rem; }
+      .panel { padding: 1rem; overflow: hidden; }
+      .panel h2 { font-size: 1rem; margin: 0 0 1rem; }
+      .table-wrap { overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+      th, td { padding: .75rem .65rem; border-bottom: 1px solid #edf0f5; text-align: left; }
+      th { color: #667188; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
+      td.numeric, th.numeric { text-align: right; font-variant-numeric: tabular-nums; }
+      .post-title { min-width: 280px; font-weight: 650; }
+      .tenant { display: inline-block; padding: .2rem .5rem; border-radius: 999px; background: #edf2ff; color: #3451a4; font-size: .72rem; }
+      .sources { list-style: none; padding: 0; margin: 0; }
+      .sources li { display: flex; justify-content: space-between; gap: 1rem; padding: .7rem 0; border-bottom: 1px solid #edf0f5; }
+      .empty { color: #768198; padding: 2rem; text-align: center; }
+      @media (max-width: 900px) { .cards { grid-template-columns: repeat(2, 1fr); } .layout { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div><p>Bloom · aquisição e conversão</p><h1>Painel de métricas</h1></div>
+      <div class="filters">
+        <label>Tenant<select id="tenant"><option value="">Todos</option><option value="viralbarato">ViralBarato</option><option value="mundonoprato">Mundo no Prato</option></select></label>
+        <label>Período<select id="days"><option value="7">7 dias</option><option value="30" selected>30 dias</option><option value="90">90 dias</option></select></label>
+        <a href="/admin/review">Revisão editorial</a>
+      </div>
+    </header>
+    <main>
+      <section class="cards">
+        <article class="card"><span>Artigos publicados</span><strong id="posts">—</strong></article>
+        <article class="card"><span>Visitas identificadas</span><strong id="views">—</strong><small>sessões únicas por artigo/dia</small></article>
+        <article class="card"><span>Cliques afiliados</span><strong id="clicks">—</strong></article>
+        <article class="card"><span>CTR afiliado</span><strong id="ctr">—</strong></article>
+        <article class="card"><span>Receita</span><strong>—</strong><small>integração pendente</small></article>
+      </section>
+      <section class="layout">
+        <article class="panel"><h2>Desempenho por artigo</h2><div class="table-wrap"><table><thead><tr><th>Artigo</th><th>Tenant</th><th class="numeric">Visitas</th><th class="numeric">Cliques</th><th class="numeric">CTR</th></tr></thead><tbody id="rows"></tbody></table></div><div id="empty" class="empty" hidden>Nenhum artigo encontrado.</div></article>
+        <aside class="panel"><h2>Principais origens</h2><ul id="sources" class="sources"></ul></aside>
+      </section>
+    </main>
+    <script>
+      const tenant = document.querySelector('#tenant');
+      const days = document.querySelector('#days');
+      const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
+      const number = new Intl.NumberFormat('pt-BR');
+      async function load() {
+        const query = new URLSearchParams({ days: days.value });
+        if (tenant.value) query.set('tenant_slug', tenant.value);
+        const response = await fetch(`/api/editorial/metrics?${query}`);
+        if (!response.ok) throw new Error('Falha ao carregar métricas');
+        const data = await response.json();
+        document.querySelector('#posts').textContent = number.format(data.summary.published_posts);
+        document.querySelector('#views').textContent = number.format(data.summary.views);
+        document.querySelector('#clicks').textContent = number.format(data.summary.clicks);
+        document.querySelector('#ctr').textContent = `${Number(data.summary.ctr).toLocaleString('pt-BR')}%`;
+        const rows = document.querySelector('#rows');
+        rows.innerHTML = data.posts.map((post) => `<tr><td class="post-title">${escapeHtml(post.title)}</td><td><span class="tenant">${escapeHtml(post.tenant_name)}</span></td><td class="numeric">${number.format(post.views)}</td><td class="numeric">${number.format(post.clicks)}</td><td class="numeric">${Number(post.ctr).toLocaleString('pt-BR')}%</td></tr>`).join('');
+        document.querySelector('#empty').hidden = data.posts.length > 0;
+        document.querySelector('#sources').innerHTML = data.sources.length
+          ? data.sources.map((source) => `<li><span>${escapeHtml(source.source)}</span><strong>${number.format(source.views)}</strong></li>`).join('')
+          : '<li class="empty">Dados de origem aparecerão após as primeiras visitas.</li>';
+      }
+      tenant.addEventListener('change', () => load().catch(alert));
+      days.addEventListener('change', () => load().catch(alert));
+      load().catch((error) => alert(error.message));
+    </script>
+  </body>
+</html>
