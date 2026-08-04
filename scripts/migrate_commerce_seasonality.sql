@@ -134,4 +134,9 @@ LEFT JOIN products pr ON p.product_id = pr.id AND p.tenant_id = pr.tenant_id
 LEFT JOIN post_commerce pc ON pc.post_id = p.id AND pc.tenant_id = p.tenant_id
 JOIN tenants t ON p.tenant_id = t.id;
 
+GRANT SELECT ON vw_posts_enriched TO bloom_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON post_commerce TO bloom_app;
+GRANT USAGE, SELECT ON SEQUENCE post_commerce_id_seq TO bloom_app;
+GRANT SELECT ON seasonal_events, seasonal_product_targets TO bloom_app;
+
 COMMIT;
