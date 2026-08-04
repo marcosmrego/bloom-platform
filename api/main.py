@@ -936,6 +936,7 @@ def _review_post_query() -> str:
             p.title, p.slug, p.excerpt, p.content, p.image_url,
             c.slug AS category_slug, c.name AS category_name,
             pr.asin AS product_asin, pr.title AS product_title,
+            pr.affiliate_url,
             p.rating, p.pros, p.cons, p.tags, p.seo_title,
             p.seo_description, p.source_evidence, p.quality_gates,
             p.status, p.created_by, p.created_at,

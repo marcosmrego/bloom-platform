@@ -73,12 +73,18 @@ export const prerender = false;
         <div id="reading-panel" class="panel reading-panel">
           <div class="article-cover"><img id="hero-image" alt="Imagem editorial do artigo" /></div>
           <div class="article-shell">
+            <div id="preview-state" class="preview-state" role="status">Preparando a leitura…</div>
             <iframe id="preview" class="preview" sandbox="" title="Prévia segura do artigo"></iframe>
+            <details id="preview-fallback" class="preview-fallback" hidden>
+              <summary>A prévia não apareceu? Ler o texto sem formatação</summary>
+              <pre id="preview-plain"></pre>
+            </details>
           </div>
         </div>
 
         <div id="evidence-panel" class="panel" hidden>
           <div class="section-heading"><div><span class="eyebrow">Auditoria</span><h3>O que sustenta este conteúdo</h3></div><p>Revise os gates automáticos e abra as fontes originais antes de aprovar.</p></div>
+          <div id="monetization" class="monetization"></div>
           <div id="quality-evidence" class="quality-evidence"></div>
         </div>
 
@@ -131,14 +137,20 @@ export const prerender = false;
       const empty = document.querySelector<HTMLElement>('#empty')!;
       const form = document.querySelector<HTMLFormElement>('#edit-form')!;
       const preview = document.querySelector<HTMLIFrameElement>('#preview')!;
+      const previewState = document.querySelector<HTMLElement>('#preview-state')!;
+      const previewFallback = document.querySelector<HTMLDetailsElement>('#preview-fallback')!;
+      const previewPlain = document.querySelector<HTMLElement>('#preview-plain')!;
       const heroImage = document.querySelector<HTMLImageElement>('#hero-image')!;
       const history = document.querySelector<HTMLElement>('#history')!;
       const qualityEvidence = document.querySelector<HTMLElement>('#quality-evidence')!;
+      const monetization = document.querySelector<HTMLElement>('#monetization')!;
       const toast = document.querySelector<HTMLElement>('#toast')!;
       const statusFilter = document.querySelector<HTMLSelectElement>('#status')!;
       const tenantFilter = document.querySelector<HTMLSelectElement>('#tenant')!;
       const decisionPanel = document.querySelector<HTMLElement>('#decision-panel')!;
       let selectedId: number | null = null;
+      let openRequest = 0;
+      let previewTimer: number | null = null;
 
       const fields = ['title', 'excerpt', 'content', 'image_url', 'category_slug', 'product_asin', 'rating', 'seo_title', 'seo_description'];
 
@@ -176,8 +188,40 @@ export const prerender = false;
 
       function renderPreview() {
         const content = form.elements.namedItem('content') as HTMLTextAreaElement;
-        const rendered = marked.parse(escapeHtml(content.value || '')) as string;
-        preview.srcdoc = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>:root{color:#26332b;font-family:Georgia,serif}body{max-width:760px;margin:0 auto;padding:42px 46px 70px;font-size:18px;line-height:1.82}h2{margin:2.2em 0 .65em;color:#14281d;font-size:1.6em;line-height:1.2}h3{margin-top:1.8em;color:#1c3828}p{margin:0 0 1.2em}ul,ol{padding-left:1.3em}blockquote{margin:1.5em 0;padding-left:1.2em;border-left:3px solid #b98a47;color:#536057}strong{color:#14281d}@media(max-width:600px){body{padding:24px;font-size:16px}}</style></head><body>${rendered}</body></html>`;
+        const source = content.value || '';
+        const rendered = marked.parse(escapeHtml(source)) as string;
+        const documentHtml = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>:root{color:#26332b;font-family:Georgia,serif}body{max-width:760px;margin:0 auto;padding:42px 46px 70px;font-size:18px;line-height:1.82}h2{margin:2.2em 0 .65em;color:#14281d;font-size:1.6em;line-height:1.2}h3{margin-top:1.8em;color:#1c3828}p{margin:0 0 1.2em}ul,ol{padding-left:1.3em}blockquote{margin:1.5em 0;padding-left:1.2em;border-left:3px solid #b98a47;color:#536057}strong{color:#14281d}@media(max-width:600px){body{padding:24px;font-size:16px}}</style></head><body>${rendered || '<p>Este conteúdo está vazio.</p>'}</body></html>`;
+        if (previewTimer !== null) window.clearTimeout(previewTimer);
+        previewState.textContent = 'Preparando a leitura…';
+        previewState.hidden = false;
+        preview.hidden = true;
+        previewFallback.hidden = false;
+        previewFallback.open = false;
+        previewPlain.textContent = source || 'Este conteúdo está vazio.';
+        preview.onload = () => {
+          if (preview.srcdoc !== documentHtml) return;
+          previewState.hidden = true;
+          preview.hidden = false;
+          if (previewTimer !== null) window.clearTimeout(previewTimer);
+        };
+        preview.removeAttribute('srcdoc');
+        window.requestAnimationFrame(() => { preview.srcdoc = documentHtml; });
+        previewTimer = window.setTimeout(() => {
+          if (!preview.hidden) return;
+          previewState.textContent = 'A prévia formatada demorou para carregar. Use o texto sem formatação abaixo.';
+          previewFallback.open = true;
+        }, 2500);
+      }
+
+      function renderMonetization(post: any) {
+        const hasAffiliate = Boolean(post.product_asin && post.affiliate_url);
+        if (!hasAffiliate) {
+          monetization.innerHTML = `<div class="monetization-card inactive"><span>Sem link afiliado</span><div><strong>Nenhum produto está associado a este conteúdo.</strong><p>Não haverá botão de compra no artigo publicado. Associe e valide um ASIN somente quando o produto exato estiver confirmado.</p></div></div>`;
+          return;
+        }
+        let tagValid = false;
+        try { tagValid = new URL(post.affiliate_url).searchParams.get('tag') === 'marcosmrego-20'; } catch {}
+        monetization.innerHTML = `<div class="monetization-card active"><span>Link afiliado ativo</span><div><strong>${escapeHtml(post.product_title || 'Produto associado')}</strong><p>ASIN: <code>${escapeHtml(post.product_asin)}</code> · Tag: ${tagValid ? 'validada' : 'verificar'}</p><a href="${escapeHtml(post.affiliate_url)}" target="_blank" rel="noopener noreferrer nofollow sponsored">Abrir URL final da Amazon ↗</a></div></div>`;
       }
 
       async function loadPosts() {
@@ -204,8 +248,10 @@ export const prerender = false;
       }
 
       async function openPost(id: number) {
+        const requestId = ++openRequest;
         try {
           const post = await api(`posts/${id}`);
+          if (requestId !== openRequest) return;
           selectedId = id;
           document.querySelector('#tenant-label')!.textContent = post.tenant_name;
           document.querySelector('#post-id')!.textContent = `Draft #${post.id}`;
@@ -221,6 +267,7 @@ export const prerender = false;
           decisionPanel.hidden = post.status !== 'draft';
           const gates = post.quality_gates || {};
           const sources = Array.isArray(post.source_evidence) ? post.source_evidence : [];
+          renderMonetization(post);
           const gateItems = [
             [gates.sources_extracted, 'Duas fontes extraídas'],
             [!gates.primary_source_required || gates.primary_source_present, gates.primary_source_required ? 'Fonte primária presente' : 'Fonte primária não exigida'],
@@ -232,6 +279,7 @@ export const prerender = false;
           qualityEvidence.innerHTML = `<div class="gate-grid">${gateItems.map(([ok, label]) => `<div class="gate ${ok ? 'pass' : 'warn'}"><span>${ok ? '✓' : '!'}</span><strong>${escapeHtml(label)}</strong></div>`).join('')}</div><div class="sources"><h4>Fontes consultadas <span>${sources.length}</span></h4>${sources.length ? sources.map((source: any, index: number) => `<article><div class="source-number">${index + 1}</div><div><span class="source-type">${escapeHtml(source.source_type)}</span><a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.title)}</a><small>Extraída em ${escapeHtml(source.extracted_at)}</small><ul>${(source.evidence || []).map((item: unknown) => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div></article>`).join('') : '<p>Nenhuma evidência estruturada registrada.</p>'}</div>`;
           history.innerHTML = post.reviews?.length ? post.reviews.map((item: any) => `<div class="history-item"><span></span><div><strong>${escapeHtml(item.action)}</strong><p>${escapeHtml(item.reviewer)} · ${new Date(item.created_at).toLocaleString('pt-BR')}</p>${item.note ? `<blockquote>${escapeHtml(item.note)}</blockquote>` : ''}</div></div>`).join('') : '<div class="queue-empty">Nenhuma ação editorial registrada.</div>';
           renderPreview(); showPanel('reading-panel'); editor.hidden = false; empty.hidden = true; await loadPosts();
+          if (requestId !== openRequest) return;
           document.querySelector('main')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         } catch (error) { notify((error as Error).message, true); }
       }
@@ -326,11 +374,25 @@ export const prerender = false;
   .article-cover { overflow: hidden; max-width: 980px; aspect-ratio: 16 / 7; margin: 0 auto 20px; border-radius: 12px; background: #e8ece8; }
   .article-cover img { width: 100%; height: 100%; display: block; object-fit: cover; }
   .article-shell { max-width: 980px; margin: 0 auto; border: 1px solid #e1e5e1; border-radius: 12px; background: #fff; box-shadow: 0 12px 40px #17251d0c; overflow: hidden; }
+  .preview-state { padding: 28px; color: #69746d; text-align: center; }
   .preview { width: 100%; min-height: 780px; display: block; border: 0; background: white; }
+  .preview-fallback { margin: 0 24px 24px; padding: 14px 16px; border: 1px solid #e0e5e1; border-radius: 10px; background: #f8faf8; }
+  .preview-fallback summary { color: #315c41; cursor: pointer; font-size: .82rem; font-weight: 800; }
+  .preview-fallback pre { overflow: auto; max-height: 680px; margin: 16px 0 0; padding: 18px; border-radius: 8px; color: #26332b; background: white; font: 15px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
   .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 30px; max-width: 1060px; margin: 0 auto 24px; }
   .section-heading h3 { margin: 5px 0 0; font: 600 1.75rem Georgia, serif; }
   .section-heading p { max-width: 460px; margin: 0; color: #6c766f; font-size: .85rem; line-height: 1.5; }
   form, .quality-evidence, .history { max-width: 1060px; margin: 0 auto; }
+  .monetization { max-width: 1060px; margin: 0 auto 20px; }
+  .monetization-card { display: grid; grid-template-columns: 150px 1fr; gap: 18px; padding: 18px; border: 1px solid #dce3de; border-radius: 11px; }
+  .monetization-card > span { width: fit-content; height: fit-content; padding: 6px 9px; border-radius: 999px; font-size: .7rem; font-weight: 850; text-transform: uppercase; }
+  .monetization-card.active { border-color: #b9d7c1; background: #f4faf5; }
+  .monetization-card.active > span { color: #22643a; background: #dcefe1; }
+  .monetization-card.inactive { background: #f7f8f7; }
+  .monetization-card.inactive > span { color: #6b746e; background: #e7eae8; }
+  .monetization-card strong { display: block; margin-bottom: 5px; }
+  .monetization-card p { margin: 0 0 8px; color: #657069; font-size: .82rem; line-height: 1.5; }
+  .monetization-card a { color: #265a39; font-size: .82rem; font-weight: 800; }
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .full { grid-column: 1 / -1; }
   .form-actions { position: sticky; bottom: 102px; display: flex; justify-content: end; padding: 14px 0; background: linear-gradient(transparent, white 35%); }
@@ -390,6 +452,7 @@ export const prerender = false;
     .section-heading { display: block; }
     .section-heading p { margin-top: 8px; }
     .form-grid, .gate-grid { grid-template-columns: 1fr; }
+    .monetization-card { grid-template-columns: 1fr; }
     .decision-bar { grid-template-columns: 1fr; }
     .decision-actions { display: grid; grid-template-columns: 1fr 1fr; }
   }
