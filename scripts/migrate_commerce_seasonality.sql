@@ -104,7 +104,9 @@ JOIN (VALUES
 WHERE e.slug = 'dia-dos-pais' AND e.event_date = DATE '2026-08-09'
 ON CONFLICT DO NOTHING;
 
-CREATE OR REPLACE VIEW vw_posts_enriched AS
+DROP VIEW IF EXISTS vw_posts_enriched;
+
+CREATE VIEW vw_posts_enriched AS
 SELECT
     p.id, p.tenant_id, p.title, p.slug, p.excerpt, p.content, p.image_url,
     p.rating, p.pros, p.cons, p.status, p.tags, p.published_at,
