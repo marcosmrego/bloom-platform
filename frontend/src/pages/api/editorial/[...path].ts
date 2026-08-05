@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 
-const allowedPath = /^(?:metrics|revenue\/import|posts(?:\/\d+(?:\/decision)?)?|monetization\/proposals(?:\/\d+\/decision)?)$/;
+const allowedPath = /^(?:metrics|agent-reviews\/metrics|revenue\/import|posts(?:\/\d+(?:\/decision)?)?|monetization\/proposals(?:\/\d+\/decision)?)$/;
 
 const proxy: APIRoute = async ({ params, request }) => {
   const path = params.path || '';

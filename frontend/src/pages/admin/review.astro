@@ -42,7 +42,7 @@ export const prerender = false;
     <main>
       <aside class="queue">
         <div class="queue-head">
-          <div><span class="eyebrow">Sua caixa de entrada</span><strong id="count">Carregando…</strong></div>
+          <div><span class="eyebrow">Sua caixa de entrada</span><strong id="count">Carregando…</strong><small id="reviewer-metrics"></small></div>
           <button id="refresh" class="icon-button" title="Atualizar fila" aria-label="Atualizar fila">↻</button>
         </div>
         <div id="post-list" class="post-list" aria-live="polite"></div>
@@ -147,6 +147,7 @@ export const prerender = false;
 
       const list = document.querySelector<HTMLDivElement>('#post-list')!;
       const count = document.querySelector<HTMLElement>('#count')!;
+      const reviewerMetrics = document.querySelector<HTMLElement>('#reviewer-metrics')!;
       const editor = document.querySelector<HTMLElement>('#editor')!;
       const empty = document.querySelector<HTMLElement>('#empty')!;
       const form = document.querySelector<HTMLFormElement>('#edit-form')!;
@@ -282,6 +283,17 @@ export const prerender = false;
         } catch (error) { list.innerHTML = '<p class="loading error-text">Não foi possível carregar a fila.</p>'; notify((error as Error).message, true); }
       }
 
+      async function loadReviewerMetrics() {
+        try {
+          const data = await api('agent-reviews/metrics');
+          reviewerMetrics.textContent = data.human_decisions
+            ? `${data.human_decisions} decisões comparadas · ${data.agreement_rate}% de concordância`
+            : `${data.total} parecer${data.total === 1 ? '' : 'es'} · aguardando decisões humanas`;
+        } catch {
+          reviewerMetrics.textContent = 'Métricas do revisor indisponíveis';
+        }
+      }
+
       async function openPost(id: number) {
         const requestId = ++openRequest;
         try {
@@ -349,7 +361,7 @@ export const prerender = false;
         if (!window.confirm(`Confirma que deseja ${verb} o draft #${selectedId}? Esta decisão ficará registrada.`)) return;
         try {
           await api(`posts/${selectedId}/decision`, { method: 'POST', body: JSON.stringify({ decision, reviewer: document.querySelector<HTMLInputElement>('#reviewer')!.value, note: document.querySelector<HTMLTextAreaElement>('#decision-note')!.value }) });
-          notify(decision === 'approve' ? 'Conteúdo publicado.' : 'Conteúdo rejeitado.'); selectedId = null; editor.hidden = true; empty.hidden = false; await loadPosts();
+          notify(decision === 'approve' ? 'Conteúdo publicado.' : 'Conteúdo rejeitado.'); selectedId = null; editor.hidden = true; empty.hidden = false; await Promise.all([loadPosts(), loadReviewerMetrics()]);
         } catch (error) { notify((error as Error).message, true); }
       }
 
@@ -359,7 +371,7 @@ export const prerender = false;
       document.querySelector('#reject')!.addEventListener('click', () => decide('reject'));
       document.querySelector('#refresh')!.addEventListener('click', loadPosts);
       statusFilter.addEventListener('change', loadPosts); tenantFilter.addEventListener('change', loadPosts);
-      loadPosts();
+      loadPosts(); loadReviewerMetrics();
     </script>
   </body>
 </html>
@@ -392,6 +404,7 @@ export const prerender = false;
   .queue-head { min-height: 82px; display: flex; align-items: center; justify-content: space-between; padding: 18px; border-bottom: 1px solid #e6e9e6; }
   .queue-head div { display: grid; gap: 4px; }
   .queue-head strong { font-size: 1.15rem; }
+  .queue-head small { display: block; max-width: 220px; margin-top: 4px; color: #7a857d; font-size: .66rem; line-height: 1.35; }
   .icon-button { width: 38px; height: 38px; border: 1px solid #dde4df; border-radius: 9px; color: #42604d; background: #f6f8f6; font-size: 1.2rem; }
   .post-list { height: calc(100% - 82px); overflow: auto; }
   .post-item { width: 100%; display: grid; gap: 8px; padding: 17px 18px; text-align: left; border: 0; border-bottom: 1px solid #edf0ed; color: #101713; background: #fff; }
