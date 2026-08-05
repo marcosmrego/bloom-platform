@@ -27,6 +27,8 @@ from main import (
     build_performance_alerts,
     validate_affiliate_destination,
     build_affiliate_search_destination,
+    agent_review_input_hash,
+    AgentEditorialReviewCreate,
 )
 
 
@@ -68,6 +70,41 @@ class AffiliateDestinationValidationTests(unittest.TestCase):
         self.assertIsNone(validate_affiliate_destination("no_match", None))
         with self.assertRaises(HTTPException):
             validate_affiliate_destination("no_match", "https://www.amazon.com.br/")
+
+
+class AgentEditorialReviewContractTests(unittest.TestCase):
+    def test_input_hash_is_stable_and_changes_with_reviewed_content(self):
+        post = {
+            "title": "Guia de panelas",
+            "content": "Conteúdo original",
+            "tags": ["cozinha", "panelas"],
+            "source_evidence": [{"url": "https://example.org", "evidence": ["a"]}],
+        }
+        reordered = dict(reversed(list(post.items())))
+        self.assertEqual(agent_review_input_hash(post), agent_review_input_hash(reordered))
+        changed = dict(post, content="Conteúdo corrigido")
+        self.assertNotEqual(agent_review_input_hash(post), agent_review_input_hash(changed))
+
+    def test_structured_report_accepts_required_shape(self):
+        checks = [
+            {
+                "code": code,
+                "status": "pass",
+                "severity": "low",
+                "evidence": f"Evidência específica para {code}",
+            }
+            for code in ("sources", "claims", "structure", "seo", "image", "commerce")
+        ]
+        report = AgentEditorialReviewCreate(
+            post_id=59,
+            input_hash="a" * 64,
+            recommendation="pass",
+            risk_level="low",
+            summary="O draft atende aos critérios da primeira passagem editorial.",
+            checks=checks,
+        )
+        self.assertEqual(len(report.checks), 6)
+        self.assertEqual(report.recommendation, "pass")
 
 
 class AnalyticsValidationTests(unittest.TestCase):

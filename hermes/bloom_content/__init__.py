@@ -226,6 +226,47 @@ def _handle_propose_monetization(args: dict, **_kwargs) -> str:
         return tool_error(f"Bloom monetization proposal failed: {exc}")
 
 
+def _handle_editorial_review_backlog(args: dict, **_kwargs) -> str:
+    try:
+        tenant = _tenant(args.get("tenant"))
+        limit = int(args.get("limit") or 1)
+        if limit < 1 or limit > 3:
+            raise ValueError("limit must be between 1 and 3")
+        base_url, _token = _config()
+        response = requests.get(
+            f"{base_url}/api/v1/{tenant}/editorial/reviewer/backlog",
+            headers=_headers(), params={"limit": limit}, timeout=TIMEOUT,
+        )
+        payload = _json_response(response)
+        payload["success"] = True
+        return tool_result(payload)
+    except Exception as exc:
+        return tool_error(f"Bloom editorial review backlog failed: {exc}")
+
+
+def _handle_submit_editorial_review(args: dict, **_kwargs) -> str:
+    try:
+        tenant = _tenant(args.get("tenant"))
+        key = str(args.get("idempotency_key") or "").strip()
+        if len(key) < 8:
+            raise ValueError("idempotency_key is required")
+        report = dict(args.get("report") or {})
+        if report.get("recommendation") not in {"pass", "needs_changes", "block"}:
+            raise ValueError("recommendation must be pass, needs_changes or block")
+        base_url, _token = _config()
+        headers = _headers()
+        headers["Idempotency-Key"] = key
+        response = requests.post(
+            f"{base_url}/api/v1/{tenant}/editorial/reviewer/reports",
+            headers=headers, json=report, timeout=TIMEOUT,
+        )
+        payload = _json_response(response)
+        payload["success"] = True
+        return tool_result(payload)
+    except Exception as exc:
+        return tool_error(f"Bloom editorial review submission failed: {exc}")
+
+
 def _handle_create_draft(args: dict, **_kwargs) -> str:
     try:
         tenant = _tenant(args.get("tenant"))
@@ -394,6 +435,63 @@ BLOOM_PROPOSE_MONETIZATION_SCHEMA = {
     },
 }
 
+BLOOM_EDITORIAL_REVIEW_BACKLOG_SCHEMA = {
+    "name": "bloom_editorial_review_backlog",
+    "description": "List draft posts that need a first-pass agent review. This tool is read-only.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tenant": {"type": "string", "enum": sorted(ALLOWED_TENANTS)},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 3},
+        },
+        "required": ["tenant"],
+    },
+}
+
+
+BLOOM_SUBMIT_EDITORIAL_REVIEW_SCHEMA = {
+    "name": "bloom_submit_editorial_review",
+    "description": "Submit a structured first-pass review for a Bloom draft. It cannot edit, approve, reject or publish.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tenant": {"type": "string", "enum": sorted(ALLOWED_TENANTS)},
+            "idempotency_key": {"type": "string", "minLength": 8, "maxLength": 128},
+            "report": {
+                "type": "object",
+                "properties": {
+                    "post_id": {"type": "integer", "minimum": 1},
+                    "input_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+                    "recommendation": {"type": "string", "enum": ["pass", "needs_changes", "block"]},
+                    "risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
+                    "summary": {"type": "string", "minLength": 20, "maxLength": 2000},
+                    "checks": {
+                        "type": "array", "minItems": 6, "maxItems": 30,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "code": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+                                "status": {"type": "string", "enum": ["pass", "warn", "fail"]},
+                                "severity": {"type": "string", "enum": ["low", "medium", "high"]},
+                                "evidence": {"type": "string", "minLength": 3, "maxLength": 1000},
+                                "recommendation": {"type": "string", "maxLength": 1000},
+                            },
+                            "required": ["code", "status", "severity", "evidence"],
+                        },
+                    },
+                    "suggested_edits": {
+                        "type": "array", "maxItems": 20,
+                        "items": {"type": "string", "minLength": 1, "maxLength": 1000},
+                    },
+                },
+                "required": ["post_id", "input_hash", "recommendation", "risk_level", "summary", "checks"],
+            },
+        },
+        "required": ["tenant", "idempotency_key", "report"],
+    },
+}
+
+
 BLOOM_CREATE_DRAFT_SCHEMA = {
     "name": "bloom_create_draft",
     "description": "Create an idempotent Bloom draft. This tool can never publish.",
@@ -472,6 +570,8 @@ def register(ctx) -> None:
         ("bloom_monetization_backlog", BLOOM_MONETIZATION_BACKLOG_SCHEMA, _handle_monetization_backlog),
         ("bloom_build_affiliate_search", BLOOM_BUILD_AFFILIATE_SEARCH_SCHEMA, _handle_build_affiliate_search),
         ("bloom_propose_monetization", BLOOM_PROPOSE_MONETIZATION_SCHEMA, _handle_propose_monetization),
+        ("bloom_editorial_review_backlog", BLOOM_EDITORIAL_REVIEW_BACKLOG_SCHEMA, _handle_editorial_review_backlog),
+        ("bloom_submit_editorial_review", BLOOM_SUBMIT_EDITORIAL_REVIEW_SCHEMA, _handle_submit_editorial_review),
         ("bloom_upload_media", BLOOM_UPLOAD_MEDIA_SCHEMA, _handle_upload_media),
         ("bloom_create_draft", BLOOM_CREATE_DRAFT_SCHEMA, _handle_create_draft),
     ):

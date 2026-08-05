@@ -24,5 +24,9 @@ Snapshot validado pelo operador contra repositório e produção em 05/08/2026.
   eleição, health check e idempotência entre produtores.
 - Não existe medição confirmada de custo diário dos crons. O valor de
   US$ 0,50/dia citado anteriormente é uma hipótese sem base suficiente.
-- O manifesto `plugin.yaml` versão 1.1.0 declara as mesmas sete ferramentas
+- O manifesto `plugin.yaml` versão 1.2.0 declara as mesmas nove ferramentas
   registradas pelo plugin.
+- O revisor editorial de primeira passagem está implementado pela skill
+  `bloom-reviewer`. Ele lê drafts e envia pareceres estruturados; não edita,
+  aprova, rejeita, arquiva nem publica. Alterações humanas invalidam o parecer
+  corrente, e a decisão final registra concordância para avaliação futura.

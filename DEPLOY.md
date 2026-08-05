@@ -105,3 +105,14 @@ ADS_TXT_EXTRA=linhas_ads_txt_fornecidas_pelas_redes
 # 4. Revise as propostas em /admin/metrics. Aprovação e rejeição exigem o painel
 #    protegido e ficam registradas em monetization_proposals.
 # 5. Rode manualmente em lotes pequenos antes de agendar qualquer recorrência.
+
+## Revisor editorial de primeira passagem
+## ──────────────────────────────────────
+# 1. Execute: python scripts/apply_agent_editorial_review_migration.py
+# 2. Atualize o plugin bloom_content e instale a skill bloom-reviewer no perfil
+#    isolado do Hermes.
+# 3. O Hermes pode listar drafts e enviar pareceres estruturados. O token de
+#    automação não permite editar, aprovar, rejeitar nem publicar.
+# 4. Alterar um draft invalida o parecer corrente. A aprovação/rejeição humana
+#    registra concordância para medir a qualidade do revisor antes de ampliar
+#    sua autonomia.

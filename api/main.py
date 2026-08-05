@@ -264,6 +264,26 @@ def post_request_hash(data: "PostCreate") -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def agent_review_input_hash(post: Dict[str, Any]) -> str:
+    """Fingerprint only the draft fields inspected by the first-pass reviewer."""
+    fields = (
+        "title", "slug", "excerpt", "content", "image_url", "category_slug",
+        "product_asin", "rating", "pros", "cons", "tags", "seo_title",
+        "seo_description", "source_evidence", "quality_gates",
+        "commerce_link_type", "commerce_url", "coupon_code", "offer_text",
+        "offer_valid_until",
+    )
+    payload = {field: post.get(field) for field in fields}
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 SENSITIVE_EDITORIAL_TERMS = {
     "alergia",
     "caloria",
@@ -615,6 +635,24 @@ class MonetizationProposalDecision(BaseModel):
 
 class AffiliateSearchDestinationCreate(BaseModel):
     query: str = Field(min_length=3, max_length=120)
+
+
+class AgentEditorialCheck(BaseModel):
+    code: str = Field(min_length=2, max_length=60, pattern=r"^[a-z][a-z0-9_]*$")
+    status: Literal["pass", "warn", "fail"]
+    severity: Literal["low", "medium", "high"]
+    evidence: str = Field(min_length=3, max_length=1000)
+    recommendation: Optional[str] = Field(default=None, max_length=1000)
+
+
+class AgentEditorialReviewCreate(BaseModel):
+    post_id: int = Field(ge=1)
+    input_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    recommendation: Literal["pass", "needs_changes", "block"]
+    risk_level: Literal["low", "medium", "high"]
+    summary: str = Field(min_length=20, max_length=2000)
+    checks: List[AgentEditorialCheck] = Field(min_length=1, max_length=30)
+    suggested_edits: List[str] = Field(default_factory=list, max_length=20)
 
 
 class TopicSimilarityCheck(BaseModel):
@@ -1210,7 +1248,18 @@ def _review_post_query() -> str:
             p.rating, p.pros, p.cons, p.tags, p.seo_title,
             p.seo_description, p.source_evidence, p.quality_gates,
             p.status, p.created_by, p.created_at,
-            p.updated_at, p.published_at
+            p.updated_at, p.published_at,
+            ar.id AS agent_review_id,
+            ar.input_hash AS agent_review_input_hash,
+            ar.recommendation AS agent_recommendation,
+            ar.risk_level AS agent_risk_level,
+            ar.summary AS agent_summary,
+            ar.checks AS agent_checks,
+            ar.suggested_edits AS agent_suggested_edits,
+            ar.reviewer_agent,
+            ar.created_at AS agent_reviewed_at,
+            ar.human_decision AS agent_human_decision,
+            ar.agreement AS agent_human_agreement
         FROM posts p
         JOIN tenants t ON t.id = p.tenant_id
         LEFT JOIN categories c
@@ -1219,6 +1268,15 @@ def _review_post_query() -> str:
           ON pr.id = p.product_id AND pr.tenant_id = p.tenant_id
         LEFT JOIN post_commerce pc
           ON pc.post_id = p.id AND pc.tenant_id = p.tenant_id
+        LEFT JOIN LATERAL (
+            SELECT *
+            FROM agent_editorial_reviews aer
+            WHERE aer.post_id = p.id
+              AND aer.tenant_id = p.tenant_id
+              AND aer.status = 'current'
+            ORDER BY aer.created_at DESC, aer.id DESC
+            LIMIT 1
+        ) ar ON TRUE
     """
 
 
@@ -1440,6 +1498,212 @@ async def import_financial_entries(
     return await run_db_task(_sync, data)
 
 
+REQUIRED_AGENT_REVIEW_CHECKS = {
+    "sources",
+    "claims",
+    "structure",
+    "seo",
+    "image",
+    "commerce",
+}
+
+
+@app.get("/api/v1/{tenant_slug}/editorial/reviewer/backlog")
+async def list_agent_review_backlog(
+    tenant_slug: str,
+    limit: int = 3,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_content_token(authorization)
+    if tenant_slug not in {"viralbarato", "mundonoprato"}:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    if limit < 1 or limit > 10:
+        raise HTTPException(status_code=422, detail="Limit must be between 1 and 10")
+
+    def _sync(tslug: str, requested: int):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                _review_post_query()
+                + """
+                WHERE t.slug = %s AND p.status = 'draft'
+                ORDER BY p.updated_at ASC, p.id ASC
+                LIMIT 50
+                """,
+                (tslug,),
+            )
+            items = []
+            for row in cur.fetchall():
+                post = dict(row)
+                input_hash = agent_review_input_hash(post)
+                if (
+                    post.get("agent_review_id")
+                    and post.get("agent_review_input_hash") == input_hash
+                ):
+                    continue
+                item = {
+                    key: post.get(key)
+                    for key in (
+                        "id", "tenant_slug", "title", "slug", "excerpt", "content",
+                        "image_url", "category_slug", "category_name", "product_asin",
+                        "product_title", "affiliate_url", "commerce_link_type",
+                        "commerce_url", "coupon_code", "offer_text", "offer_valid_until",
+                        "rating", "pros", "cons", "tags", "seo_title",
+                        "seo_description", "source_evidence", "quality_gates",
+                        "created_by", "created_at", "updated_at",
+                    )
+                }
+                item["input_hash"] = input_hash
+                item["previous_review_id"] = post.get("agent_review_id")
+                items.append(item)
+                if len(items) >= requested:
+                    break
+            return {"items": items, "count": len(items), "limit": requested}
+        finally:
+            conn.close()
+
+    return await run_db_task(_sync, tenant_slug, limit)
+
+
+@app.post("/api/v1/{tenant_slug}/editorial/reviewer/reports")
+async def create_agent_review_report(
+    tenant_slug: str,
+    data: AgentEditorialReviewCreate,
+    authorization: Optional[str] = Header(default=None),
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+):
+    require_content_token(authorization)
+    if tenant_slug not in {"viralbarato", "mundonoprato"}:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    safe_key = validate_idempotency_key(idempotency_key)
+    check_codes = [check.code for check in data.checks]
+    if len(check_codes) != len(set(check_codes)):
+        raise HTTPException(status_code=422, detail="Review check codes must be unique")
+    missing_checks = sorted(REQUIRED_AGENT_REVIEW_CHECKS - set(check_codes))
+    if missing_checks:
+        raise HTTPException(
+            status_code=422,
+            detail="Missing required review checks: " + ", ".join(missing_checks),
+        )
+    if data.recommendation == "pass" and any(
+        check.status == "fail" for check in data.checks
+    ):
+        raise HTTPException(status_code=422, detail="Pass reports cannot contain failed checks")
+    request_hash = hashlib.sha256(
+        json.dumps(
+            data.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    def _sync(tslug: str, payload: AgentEditorialReviewCreate, key: str, digest: str):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM tenants WHERE slug = %s AND status = 'active'", (tslug,))
+            tenant = cur.fetchone()
+            if not tenant:
+                return {"error": "Tenant not found"}, 404
+            cur.execute(
+                "SELECT id, request_hash FROM agent_editorial_reviews WHERE tenant_id = %s AND idempotency_key = %s",
+                (tenant["id"], key),
+            )
+            existing = cur.fetchone()
+            if existing:
+                if existing["request_hash"] != digest:
+                    return {"error": "Idempotency-Key was already used for another report"}, 409
+                return {"status": "replayed", "id": existing["id"], "post_id": payload.post_id}
+            cur.execute(
+                _review_post_query() + " WHERE p.id = %s AND p.tenant_id = %s FOR UPDATE OF p",
+                (payload.post_id, tenant["id"]),
+            )
+            row = cur.fetchone()
+            if not row:
+                return {"error": "Draft not found for tenant"}, 404
+            post = dict(row)
+            if post["status"] != "draft":
+                return {"error": "Only draft posts can receive agent reviews"}, 409
+            current_hash = agent_review_input_hash(post)
+            if current_hash != payload.input_hash:
+                return {"error": "Draft changed after it entered the review backlog"}, 409
+            cur.execute(
+                "UPDATE agent_editorial_reviews SET status = 'superseded', updated_at = NOW() WHERE post_id = %s AND tenant_id = %s AND status = 'current'",
+                (payload.post_id, tenant["id"]),
+            )
+            cur.execute(
+                """
+                INSERT INTO agent_editorial_reviews (
+                    tenant_id, post_id, idempotency_key, request_hash, input_hash,
+                    recommendation, risk_level, summary, checks, suggested_edits
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id, created_at
+                """,
+                (
+                    tenant["id"], payload.post_id, key, digest, payload.input_hash,
+                    payload.recommendation, payload.risk_level, payload.summary.strip(),
+                    psycopg2.extras.Json([check.model_dump(mode="json") for check in payload.checks]),
+                    psycopg2.extras.Json([item.strip() for item in payload.suggested_edits if item.strip()]),
+                ),
+            )
+            created = cur.fetchone()
+            conn.commit()
+            return {
+                "status": "pending_human_review",
+                "id": created["id"],
+                "post_id": payload.post_id,
+                "recommendation": payload.recommendation,
+                "risk_level": payload.risk_level,
+                "created_at": created["created_at"],
+            }
+        except Exception:
+            conn.rollback()
+            logger.exception("Agent editorial review failed for post=%s", payload.post_id)
+            return {"error": "Internal agent editorial review error"}, 500
+        finally:
+            conn.close()
+
+    result = await run_db_task(_sync, tenant_slug, data, safe_key, request_hash)
+    if isinstance(result, tuple):
+        raise HTTPException(status_code=result[1], detail=result[0]["error"])
+    return result
+
+
+@app.get("/api/v1/editorial/review/agent-reviews/metrics")
+async def get_agent_review_metrics(
+    authorization: Optional[str] = Header(default=None),
+):
+    require_review_token(authorization)
+
+    def _sync():
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT COUNT(*) AS total,
+                       COUNT(*) FILTER (WHERE status = 'current') AS current,
+                       COUNT(*) FILTER (WHERE human_decision IS NOT NULL) AS human_decisions,
+                       COUNT(*) FILTER (WHERE agreement IS TRUE) AS agreements,
+                       COUNT(*) FILTER (WHERE agreement IS FALSE) AS disagreements
+                FROM agent_editorial_reviews
+                """
+            )
+            result = dict(cur.fetchone())
+            decisions = result["human_decisions"] or 0
+            result["agreement_rate"] = round(
+                ((result["agreements"] or 0) / decisions * 100) if decisions else 0,
+                2,
+            )
+            return result
+        finally:
+            conn.close()
+
+    return await run_db_task(_sync)
+
+
 @app.get("/api/v1/editorial/review/posts")
 async def list_review_posts(
     tenant_slug: Optional[str] = None,
@@ -1531,6 +1795,24 @@ async def get_review_post(
                 (target_id,),
             )
             result = dict(post)
+            if result.get("agent_review_id"):
+                result["agent_review"] = {
+                    "id": result.get("agent_review_id"),
+                    "input_hash": result.get("agent_review_input_hash"),
+                    "recommendation": result.get("agent_recommendation"),
+                    "risk_level": result.get("agent_risk_level"),
+                    "summary": result.get("agent_summary"),
+                    "checks": result.get("agent_checks") or [],
+                    "suggested_edits": result.get("agent_suggested_edits") or [],
+                    "reviewer_agent": result.get("reviewer_agent"),
+                    "created_at": result.get("agent_reviewed_at"),
+                    "human_decision": result.get("agent_human_decision"),
+                    "agreement": result.get("agent_human_agreement"),
+                    "stale": result.get("agent_review_input_hash")
+                    != agent_review_input_hash(result),
+                }
+            else:
+                result["agent_review"] = None
             result["reviews"] = [dict(row) for row in cur.fetchall()]
             return result
         finally:
@@ -1722,6 +2004,14 @@ async def update_review_post(
             )
             cur.execute(
                 """
+                UPDATE agent_editorial_reviews
+                SET status = 'superseded', updated_at = NOW()
+                WHERE post_id = %s AND tenant_id = %s AND status = 'current'
+                """,
+                (target_id, tenant_id),
+            )
+            cur.execute(
+                """
                 INSERT INTO post_reviews
                     (tenant_id, post_id, action, reviewer, note)
                 VALUES (%s, %s, 'updated', %s, %s)
@@ -1812,6 +2102,31 @@ async def decide_review_post(
                     audit_action,
                     reviewer_name,
                     (note or "").strip() or None,
+                ),
+            )
+            cur.execute(
+                """
+                UPDATE agent_editorial_reviews
+                SET human_decision = %s,
+                    human_reviewer = %s,
+                    human_note = %s,
+                    human_decided_at = NOW(),
+                    agreement = CASE
+                        WHEN %s = 'approved' THEN recommendation = 'pass'
+                        ELSE recommendation IN ('needs_changes', 'block')
+                    END,
+                    updated_at = NOW()
+                WHERE post_id = %s
+                  AND tenant_id = %s
+                  AND status = 'current'
+                """,
+                (
+                    audit_action,
+                    reviewer_name,
+                    (note or "").strip() or None,
+                    audit_action,
+                    target_id,
+                    post["tenant_id"],
                 ),
             )
             conn.commit()
