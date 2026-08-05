@@ -30,3 +30,8 @@ Snapshot validado pelo operador contra repositório e produção em 05/08/2026.
   `bloom-reviewer`. Ele lê drafts e envia pareceres estruturados; não edita,
   aprova, rejeita, arquiva nem publica. Alterações humanas invalidam o parecer
   corrente, e a decisão final registra concordância para avaliação futura.
+- O cron `bloom-editorial-first-pass-review` (`ef4df3064a9c`) executa diariamente
+  às `13:10 UTC`, depois do cron de drafts e antes do backfill de monetização.
+- O piloto de 05/08/2026 revisou o post 59 e criou o relatório 1 com
+  recomendação `pass`, risco `low` e seis checks aprovados. O post permaneceu em
+  `draft`; esse resultado continua aguardando decisão humana.
