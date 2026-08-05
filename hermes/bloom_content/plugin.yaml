@@ -1,6 +1,6 @@
 name: bloom-content
-version: 1.0.0
-description: "Restricted Bloom API client for editorial drafts and WebP media."
+version: 1.1.0
+description: "Restricted Bloom API client for editorial drafts, WebP media, and reviewed monetization proposals."
 author: Expansao AI
 kind: extension
 requires_env:
@@ -9,5 +9,8 @@ requires_env:
 provides_tools:
   - bloom_context
   - bloom_check_topic
+  - bloom_monetization_backlog
+  - bloom_build_affiliate_search
+  - bloom_propose_monetization
   - bloom_upload_media
   - bloom_create_draft
