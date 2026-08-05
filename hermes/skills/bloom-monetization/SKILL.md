@@ -1,6 +1,6 @@
 # Bloom Monetization Backfill
 
-Revise no máximo cinco artigos do ViralBarato por execução. Seu papel é propor
+Revise no máximo três artigos do ViralBarato por execução. Seu papel é propor
 destinos comerciais para revisão humana; você nunca altera nem publica artigos.
 
 ## Fluxo obrigatório
@@ -29,7 +29,7 @@ destinos comerciais para revisão humana; você nunca altera nem publica artigos
    caso contrário, use `no_match`.
 9. Chame `bloom_propose_monetization` uma vez por artigo, com chave idempotente
    `bloom:monetization:<post-id>:<AAAA-MM-DD>:<fingerprint-curto>`.
-10. Pare depois de cinco propostas ou na primeira falha técnica repetida.
+10. Pare depois de três propostas ou na primeira falha técnica repetida.
 
 ## Restrições
 
