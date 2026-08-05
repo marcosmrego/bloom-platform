@@ -91,3 +91,15 @@ ADS_TXT_EXTRA=linhas_ads_txt_fornecidas_pelas_redes
 # 3. Configure EDITORIAL_REVIEW_USER e EDITORIAL_REVIEW_PASSWORD no frontend.
 # 4. Acesse /admin/review e valide autenticação, edição e decisão.
 # 5. Nunca compartilhe REVIEW_API_TOKEN com o Hermes.
+
+## Backfill de monetização
+## ─────────────────────────
+# 1. Depois das migrações editorial e de comércio, execute:
+#    python scripts/apply_monetization_backfill_migration.py
+# 2. Atualize o plugin bloom_content e instale o skill bloom-monetization no
+#    perfil isolado do Hermes.
+# 3. O Hermes usa somente CONTENT_API_TOKEN para listar o backlog e propor
+#    destinos. Ele não recebe REVIEW_API_TOKEN e não altera posts publicados.
+# 4. Revise as propostas em /admin/metrics. Aprovação e rejeição exigem o painel
+#    protegido e ficam registradas em monetization_proposals.
+# 5. Rode manualmente em lotes pequenos antes de agendar qualquer recorrência.

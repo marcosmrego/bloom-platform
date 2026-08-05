@@ -167,6 +167,47 @@ def _handle_check_topic(args: dict, **_kwargs) -> str:
         return tool_error(f"Bloom topic similarity check failed: {exc}")
 
 
+def _handle_monetization_backlog(args: dict, **_kwargs) -> str:
+    try:
+        tenant = _tenant(args.get("tenant"))
+        limit = int(args.get("limit") or 10)
+        if limit < 1 or limit > 20:
+            raise ValueError("limit must be between 1 and 20")
+        base_url, _token = _config()
+        response = requests.get(
+            f"{base_url}/api/v1/{tenant}/editorial/monetization/backlog",
+            headers=_headers(), params={"limit": limit}, timeout=TIMEOUT,
+        )
+        payload = _json_response(response)
+        payload["success"] = True
+        return tool_result(payload)
+    except Exception as exc:
+        return tool_error(f"Bloom monetization backlog failed: {exc}")
+
+
+def _handle_propose_monetization(args: dict, **_kwargs) -> str:
+    try:
+        tenant = _tenant(args.get("tenant"))
+        key = str(args.get("idempotency_key") or "").strip()
+        if len(key) < 8:
+            raise ValueError("idempotency_key is required")
+        proposal = dict(args.get("proposal") or {})
+        if proposal.get("link_type") not in {"product", "search", "no_match"}:
+            raise ValueError("link_type must be product, search or no_match")
+        base_url, _token = _config()
+        headers = _headers()
+        headers["Idempotency-Key"] = key
+        response = requests.post(
+            f"{base_url}/api/v1/{tenant}/editorial/monetization/proposals",
+            headers=headers, json=proposal, timeout=TIMEOUT,
+        )
+        payload = _json_response(response)
+        payload["success"] = True
+        return tool_result(payload)
+    except Exception as exc:
+        return tool_error(f"Bloom monetization proposal failed: {exc}")
+
+
 def _handle_create_draft(args: dict, **_kwargs) -> str:
     try:
         tenant = _tenant(args.get("tenant"))
@@ -270,6 +311,58 @@ BLOOM_CHECK_TOPIC_SCHEMA = {
     },
 }
 
+BLOOM_MONETIZATION_BACKLOG_SCHEMA = {
+    "name": "bloom_monetization_backlog",
+    "description": "List published posts without an affiliate destination, ordered by measured traffic.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tenant": {"type": "string", "enum": sorted(ALLOWED_TENANTS)},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+        },
+        "required": ["tenant"],
+    },
+}
+
+BLOOM_PROPOSE_MONETIZATION_SCHEMA = {
+    "name": "bloom_propose_monetization",
+    "description": "Submit a monetization proposal for human review. This tool can never alter a published post.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tenant": {"type": "string", "enum": sorted(ALLOWED_TENANTS)},
+            "idempotency_key": {"type": "string", "minLength": 8, "maxLength": 128},
+            "proposal": {
+                "type": "object",
+                "properties": {
+                    "post_id": {"type": "integer", "minimum": 1},
+                    "link_type": {"type": "string", "enum": ["product", "search", "no_match"]},
+                    "product_asin": {"type": "string"},
+                    "product_title": {"type": "string"},
+                    "destination_url": {"type": "string"},
+                    "rationale": {"type": "string", "minLength": 20, "maxLength": 2000},
+                    "evidence": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "url": {"type": "string", "format": "uri"},
+                                "title": {"type": "string"},
+                                "extracted_at": {"type": "string"},
+                                "evidence": {"type": "array", "items": {"type": "string"}},
+                                "source_type": {"type": "string", "enum": ["official", "primary", "secondary"]},
+                            },
+                            "required": ["url", "title", "extracted_at", "evidence", "source_type"],
+                        },
+                    },
+                },
+                "required": ["post_id", "link_type", "rationale", "evidence"],
+            },
+        },
+        "required": ["tenant", "idempotency_key", "proposal"],
+    },
+}
+
 BLOOM_CREATE_DRAFT_SCHEMA = {
     "name": "bloom_create_draft",
     "description": "Create an idempotent Bloom draft. This tool can never publish.",
@@ -345,6 +438,8 @@ def register(ctx) -> None:
     for name, schema, handler in (
         ("bloom_context", BLOOM_CONTEXT_SCHEMA, _handle_context),
         ("bloom_check_topic", BLOOM_CHECK_TOPIC_SCHEMA, _handle_check_topic),
+        ("bloom_monetization_backlog", BLOOM_MONETIZATION_BACKLOG_SCHEMA, _handle_monetization_backlog),
+        ("bloom_propose_monetization", BLOOM_PROPOSE_MONETIZATION_SCHEMA, _handle_propose_monetization),
         ("bloom_upload_media", BLOOM_UPLOAD_MEDIA_SCHEMA, _handle_upload_media),
         ("bloom_create_draft", BLOOM_CREATE_DRAFT_SCHEMA, _handle_create_draft),
     ):

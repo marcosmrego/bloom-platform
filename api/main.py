@@ -14,7 +14,7 @@ from io import BytesIO
 import unicodedata
 from pathlib import Path
 from contextlib import asynccontextmanager
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -131,6 +131,30 @@ def validate_idempotency_key(value: Optional[str]) -> str:
             detail="Idempotency-Key must contain 8-128 safe characters",
         )
     return key
+
+
+def validate_affiliate_destination(
+    link_type: str, destination_url: Optional[str], product_asin: Optional[str] = None
+) -> Optional[str]:
+    """Validate a proposed Amazon Brazil destination without following it."""
+    if link_type == "no_match":
+        if destination_url or product_asin:
+            raise HTTPException(status_code=422, detail="No-match proposals cannot include a destination")
+        return None
+    url = (destination_url or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname not in {"amazon.com.br", "www.amazon.com.br"}:
+        raise HTTPException(status_code=422, detail="Destination must be an HTTPS amazon.com.br URL")
+    if parse_qs(parsed.query).get("tag") != ["marcosmrego-20"]:
+        raise HTTPException(status_code=422, detail="Destination must contain the configured affiliate tag")
+    if link_type == "product":
+        asin = (product_asin or "").strip().upper()
+        if not re.fullmatch(r"[A-Z0-9]{10}", asin):
+            raise HTTPException(status_code=422, detail="Product proposals require a valid 10-character ASIN")
+        path_asins = re.findall(r"/(?:DP|GP/PRODUCT)/([A-Z0-9]{10})(?:[/?]|$)", parsed.path.upper())
+        if not path_asins or path_asins[0] != asin:
+            raise HTTPException(status_code=422, detail="Destination URL does not match the proposed ASIN")
+    return url
 
 
 def analytics_session_hash(value: str) -> str:
@@ -552,6 +576,22 @@ class SourceEvidence(BaseModel):
     extracted_at: str
     evidence: List[str]
     source_type: Literal["official", "primary", "secondary"]
+
+
+class MonetizationProposalCreate(BaseModel):
+    post_id: int
+    link_type: Literal["product", "search", "no_match"]
+    product_asin: Optional[str] = None
+    product_title: Optional[str] = None
+    destination_url: Optional[str] = None
+    rationale: str = Field(min_length=20, max_length=2000)
+    evidence: List[SourceEvidence] = Field(default_factory=list)
+
+
+class MonetizationProposalDecision(BaseModel):
+    decision: Literal["approve", "reject"]
+    reviewer: str = Field(min_length=1, max_length=100)
+    note: Optional[str] = Field(default=None, max_length=2000)
 
 
 class TopicSimilarityCheck(BaseModel):
@@ -1767,6 +1807,279 @@ async def decide_review_post(
     result = await run_db_task(
         _sync, post_id, decision, reviewer, data.note
     )
+    if isinstance(result, tuple):
+        raise HTTPException(status_code=result[1], detail=result[0]["error"])
+    return result
+
+
+@app.get("/api/v1/{tenant_slug}/editorial/monetization/backlog")
+async def list_monetization_backlog(
+    tenant_slug: str,
+    limit: int = 20,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_content_token(authorization)
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=422, detail="Limit must be between 1 and 100")
+
+    def _sync(tslug: str, row_limit: int):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM tenants WHERE slug = %s", (tslug,))
+            tenant = cur.fetchone()
+            if not tenant:
+                return None
+            cur.execute(
+                """
+                SELECT p.id, p.title, p.slug, p.excerpt, p.content,
+                       c.slug AS category_slug, p.published_at,
+                       COALESCE(v.views, 0) AS views
+                FROM posts p
+                LEFT JOIN categories c
+                  ON c.id = p.category_id AND c.tenant_id = p.tenant_id
+                LEFT JOIN (
+                    SELECT tenant_id, post_id, COUNT(*) AS views
+                    FROM page_views GROUP BY tenant_id, post_id
+                ) v ON v.tenant_id = p.tenant_id AND v.post_id = p.id
+                LEFT JOIN vw_posts_enriched enriched
+                  ON enriched.id = p.id AND enriched.tenant_id = p.tenant_id
+                WHERE p.tenant_id = %s
+                  AND p.status = 'published'
+                  AND enriched.affiliate_url IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM monetization_proposals mp
+                      WHERE mp.post_id = p.id
+                        AND (mp.status = 'pending' OR (mp.status = 'approved' AND mp.link_type = 'no_match'))
+                  )
+                ORDER BY COALESCE(v.views, 0) DESC, p.published_at DESC NULLS LAST, p.id
+                LIMIT %s
+                """,
+                (tenant["id"], row_limit),
+            )
+            return [dict(row) for row in cur.fetchall()]
+        finally:
+            conn.close()
+
+    items = await run_db_task(_sync, tenant_slug, limit)
+    if items is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/api/v1/{tenant_slug}/editorial/monetization/proposals")
+async def create_monetization_proposal(
+    tenant_slug: str,
+    data: MonetizationProposalCreate,
+    authorization: Optional[str] = Header(default=None),
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+):
+    require_content_token(authorization)
+    safe_key = validate_idempotency_key(idempotency_key)
+    asin = (data.product_asin or "").strip().upper() or None
+    product_title = (data.product_title or "").strip() or None
+    destination = validate_affiliate_destination(data.link_type, data.destination_url, asin)
+    if data.link_type == "product" and not product_title:
+        raise HTTPException(status_code=422, detail="Product title is required")
+    if data.link_type != "no_match" and not data.evidence:
+        raise HTTPException(status_code=422, detail="At least one extracted evidence source is required")
+    request_payload = data.model_dump(mode="json")
+    request_payload.update({"product_asin": asin, "product_title": product_title, "destination_url": destination})
+    request_hash = hashlib.sha256(
+        json.dumps(request_payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+    def _sync(tslug: str):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM tenants WHERE slug = %s", (tslug,))
+            tenant = cur.fetchone()
+            if not tenant:
+                return {"error": "Tenant not found"}, 404
+            cur.execute(
+                "SELECT id, request_hash, status FROM monetization_proposals WHERE tenant_id = %s AND idempotency_key = %s",
+                (tenant["id"], safe_key),
+            )
+            existing = cur.fetchone()
+            if existing:
+                if existing["request_hash"] != request_hash:
+                    return {"error": "Idempotency key was already used with different content"}, 409
+                return {"id": existing["id"], "status": existing["status"], "idempotent_replay": True}
+            cur.execute(
+                """
+                SELECT p.id
+                FROM posts p
+                LEFT JOIN vw_posts_enriched enriched
+                  ON enriched.id = p.id AND enriched.tenant_id = p.tenant_id
+                WHERE p.id = %s AND p.tenant_id = %s
+                  AND p.status = 'published' AND enriched.affiliate_url IS NULL
+                FOR UPDATE OF p
+                """,
+                (data.post_id, tenant["id"]),
+            )
+            if not cur.fetchone():
+                return {"error": "Published post without monetization was not found"}, 409
+            cur.execute(
+                """
+                INSERT INTO monetization_proposals (
+                    tenant_id, post_id, idempotency_key, request_hash, link_type,
+                    product_asin, product_title, destination_url, rationale,
+                    evidence, proposed_by
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'hermes-bloom')
+                RETURNING id, status
+                """,
+                (
+                    tenant["id"], data.post_id, safe_key, request_hash,
+                    data.link_type, asin, product_title, destination,
+                    data.rationale.strip(), psycopg2.extras.Json(request_payload["evidence"]),
+                ),
+            )
+            proposal = dict(cur.fetchone())
+            conn.commit()
+            proposal["idempotent_replay"] = False
+            return proposal
+        except psycopg2.errors.UniqueViolation:
+            conn.rollback()
+            return {"error": "A pending proposal already exists for this post"}, 409
+        except Exception:
+            conn.rollback()
+            logger.exception("Monetization proposal failed for tenant=%s post=%s", tslug, data.post_id)
+            return {"error": "Internal monetization proposal error"}, 500
+        finally:
+            conn.close()
+
+    result = await run_db_task(_sync, tenant_slug)
+    if isinstance(result, tuple):
+        raise HTTPException(status_code=result[1], detail=result[0]["error"])
+    return result
+
+
+@app.get("/api/v1/editorial/review/monetization/proposals")
+async def list_monetization_proposals(
+    status: Literal["pending", "approved", "rejected", "superseded"] = "pending",
+    tenant_slug: Optional[str] = None,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_review_token(authorization)
+
+    def _sync():
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            params: List[Any] = [status]
+            tenant_filter = ""
+            if tenant_slug:
+                tenant_filter = "AND t.slug = %s"
+                params.append(tenant_slug)
+            cur.execute(
+                f"""
+                SELECT mp.*, t.slug AS tenant_slug, t.name AS tenant_name,
+                       p.title AS post_title, p.slug AS post_slug
+                FROM monetization_proposals mp
+                JOIN tenants t ON t.id = mp.tenant_id
+                JOIN posts p ON p.id = mp.post_id AND p.tenant_id = mp.tenant_id
+                WHERE mp.status = %s {tenant_filter}
+                ORDER BY mp.created_at, mp.id
+                """,
+                params,
+            )
+            return [dict(row) for row in cur.fetchall()]
+        finally:
+            conn.close()
+
+    items = await run_db_task(_sync)
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/api/v1/editorial/review/monetization/proposals/{proposal_id}/decision")
+async def decide_monetization_proposal(
+    proposal_id: int,
+    data: MonetizationProposalDecision,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_review_token(authorization)
+
+    def _sync():
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM monetization_proposals WHERE id = %s FOR UPDATE", (proposal_id,))
+            proposal = cur.fetchone()
+            if not proposal:
+                return {"error": "Proposal not found"}, 404
+            if proposal["status"] != "pending":
+                return {"error": "Proposal is no longer pending"}, 409
+            reviewer = data.reviewer.strip()
+            note = (data.note or "").strip() or None
+            if data.decision == "reject":
+                cur.execute(
+                    "UPDATE monetization_proposals SET status='rejected', reviewer=%s, review_note=%s, reviewed_at=NOW(), updated_at=NOW() WHERE id=%s",
+                    (reviewer, note, proposal_id),
+                )
+                conn.commit()
+                return {"id": proposal_id, "status": "rejected"}
+
+            validate_affiliate_destination(
+                proposal["link_type"], proposal["destination_url"], proposal["product_asin"]
+            )
+            if proposal["link_type"] == "product" and not (proposal["product_title"] or "").strip():
+                return {"error": "Product proposal is incomplete"}, 422
+
+            cur.execute("SELECT status FROM posts WHERE id=%s AND tenant_id=%s FOR UPDATE", (proposal["post_id"], proposal["tenant_id"]))
+            post = cur.fetchone()
+            if not post or post["status"] != "published":
+                return {"error": "Target post is not published"}, 409
+            cur.execute("SELECT affiliate_url FROM vw_posts_enriched WHERE id=%s AND tenant_id=%s", (proposal["post_id"], proposal["tenant_id"]))
+            enriched = cur.fetchone()
+            if enriched and enriched["affiliate_url"]:
+                return {"error": "Post already has an active affiliate destination"}, 409
+
+            product_id = None
+            if proposal["link_type"] == "product":
+                cur.execute(
+                    "SELECT id FROM products WHERE tenant_id=%s AND asin=%s",
+                    (proposal["tenant_id"], proposal["product_asin"]),
+                )
+                product = cur.fetchone()
+                if product:
+                    product_id = product["id"]
+                else:
+                    cur.execute(
+                        "INSERT INTO products (tenant_id, asin, title, price, affiliate_url, active) VALUES (%s,%s,%s,0,%s,TRUE) RETURNING id",
+                        (proposal["tenant_id"], proposal["product_asin"], proposal["product_title"], proposal["destination_url"]),
+                    )
+                    product_id = cur.fetchone()["id"]
+                cur.execute("UPDATE posts SET product_id=%s, updated_at=NOW() WHERE id=%s AND tenant_id=%s", (product_id, proposal["post_id"], proposal["tenant_id"]))
+
+            if proposal["link_type"] != "no_match":
+                cur.execute(
+                    """
+                    INSERT INTO post_commerce (
+                        tenant_id, post_id, link_type, product_id,
+                        destination_url, verified_at, status
+                    ) VALUES (%s,%s,%s,%s,%s,NOW(),'active')
+                    ON CONFLICT (post_id) DO UPDATE SET
+                        link_type=EXCLUDED.link_type, product_id=EXCLUDED.product_id,
+                        destination_url=EXCLUDED.destination_url,
+                        verified_at=NOW(), status='active', updated_at=NOW()
+                    """,
+                    (proposal["tenant_id"], proposal["post_id"], proposal["link_type"], product_id, proposal["destination_url"]),
+                )
+            cur.execute(
+                "UPDATE monetization_proposals SET status='approved', reviewer=%s, review_note=%s, reviewed_at=NOW(), updated_at=NOW() WHERE id=%s",
+                (reviewer, note, proposal_id),
+            )
+            conn.commit()
+            return {"id": proposal_id, "status": "approved", "post_id": proposal["post_id"]}
+        except Exception:
+            conn.rollback()
+            logger.exception("Monetization decision failed for proposal=%s", proposal_id)
+            return {"error": "Internal monetization review error"}, 500
+        finally:
+            conn.close()
+
+    result = await run_db_task(_sync)
     if isinstance(result, tuple):
         raise HTTPException(status_code=result[1], detail=result[0]["error"])
     return result

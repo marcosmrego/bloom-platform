@@ -25,7 +25,35 @@ from main import (
     FinancialEntryCreate,
     FinancialImportCreate,
     build_performance_alerts,
+    validate_affiliate_destination,
 )
+
+
+class AffiliateDestinationValidationTests(unittest.TestCase):
+    def test_accepts_matching_product_and_tagged_search(self):
+        product = "https://www.amazon.com.br/dp/B0ABCDE123?tag=marcosmrego-20"
+        self.assertEqual(
+            validate_affiliate_destination("product", product, "B0ABCDE123"),
+            product,
+        )
+        search = "https://www.amazon.com.br/s?k=brinquedo+cao&tag=marcosmrego-20"
+        self.assertEqual(validate_affiliate_destination("search", search), search)
+
+    def test_rejects_wrong_tag_domain_or_asin(self):
+        invalid = (
+            ("product", "https://www.amazon.com.br/dp/B0ABCDE123?tag=outra-20", "B0ABCDE123"),
+            ("product", "https://example.com/dp/B0ABCDE123?tag=marcosmrego-20", "B0ABCDE123"),
+            ("product", "https://www.amazon.com.br/dp/B0ABCDE123?tag=marcosmrego-20", "B0WRONG123"),
+        )
+        for link_type, url, asin in invalid:
+            with self.subTest(url=url, asin=asin):
+                with self.assertRaises(HTTPException):
+                    validate_affiliate_destination(link_type, url, asin)
+
+    def test_no_match_cannot_smuggle_destination(self):
+        self.assertIsNone(validate_affiliate_destination("no_match", None))
+        with self.assertRaises(HTTPException):
+            validate_affiliate_destination("no_match", "https://www.amazon.com.br/")
 
 
 class AnalyticsValidationTests(unittest.TestCase):
