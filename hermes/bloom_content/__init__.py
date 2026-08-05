@@ -185,6 +185,24 @@ def _handle_monetization_backlog(args: dict, **_kwargs) -> str:
         return tool_error(f"Bloom monetization backlog failed: {exc}")
 
 
+def _handle_build_affiliate_search(args: dict, **_kwargs) -> str:
+    try:
+        tenant = _tenant(args.get("tenant"))
+        query = str(args.get("query") or "").strip()
+        if len(query) < 3 or len(query) > 120:
+            raise ValueError("query must contain 3-120 characters")
+        base_url, _token = _config()
+        response = requests.post(
+            f"{base_url}/api/v1/{tenant}/editorial/monetization/search-destination",
+            headers=_headers(), json={"query": query}, timeout=TIMEOUT,
+        )
+        payload = _json_response(response)
+        payload["success"] = True
+        return tool_result(payload)
+    except Exception as exc:
+        return tool_error(f"Bloom affiliate search build failed: {exc}")
+
+
 def _handle_propose_monetization(args: dict, **_kwargs) -> str:
     try:
         tenant = _tenant(args.get("tenant"))
@@ -324,6 +342,19 @@ BLOOM_MONETIZATION_BACKLOG_SCHEMA = {
     },
 }
 
+BLOOM_BUILD_AFFILIATE_SEARCH_SCHEMA = {
+    "name": "bloom_build_affiliate_search",
+    "description": "Build a canonical Amazon Brazil affiliate search URL from plain, article-aligned product terms.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tenant": {"type": "string", "enum": sorted(ALLOWED_TENANTS)},
+            "query": {"type": "string", "minLength": 3, "maxLength": 120},
+        },
+        "required": ["tenant", "query"],
+    },
+}
+
 BLOOM_PROPOSE_MONETIZATION_SCHEMA = {
     "name": "bloom_propose_monetization",
     "description": "Submit a monetization proposal for human review. This tool can never alter a published post.",
@@ -439,6 +470,7 @@ def register(ctx) -> None:
         ("bloom_context", BLOOM_CONTEXT_SCHEMA, _handle_context),
         ("bloom_check_topic", BLOOM_CHECK_TOPIC_SCHEMA, _handle_check_topic),
         ("bloom_monetization_backlog", BLOOM_MONETIZATION_BACKLOG_SCHEMA, _handle_monetization_backlog),
+        ("bloom_build_affiliate_search", BLOOM_BUILD_AFFILIATE_SEARCH_SCHEMA, _handle_build_affiliate_search),
         ("bloom_propose_monetization", BLOOM_PROPOSE_MONETIZATION_SCHEMA, _handle_propose_monetization),
         ("bloom_upload_media", BLOOM_UPLOAD_MEDIA_SCHEMA, _handle_upload_media),
         ("bloom_create_draft", BLOOM_CREATE_DRAFT_SCHEMA, _handle_create_draft),

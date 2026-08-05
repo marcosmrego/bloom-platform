@@ -26,10 +26,24 @@ from main import (
     FinancialImportCreate,
     build_performance_alerts,
     validate_affiliate_destination,
+    build_affiliate_search_destination,
 )
 
 
 class AffiliateDestinationValidationTests(unittest.TestCase):
+    def test_builds_canonical_search_destination(self):
+        result = build_affiliate_search_destination("  power   bank 20000 mAh ")
+        self.assertEqual(result["query"], "power bank 20000 mAh")
+        self.assertEqual(result["link_type"], "search")
+        self.assertIn("k=power+bank+20000+mAh", result["destination_url"])
+        self.assertIn("tag=marcosmrego-20", result["destination_url"])
+
+    def test_rejects_url_or_tag_in_search_terms(self):
+        for query in ("https://example.com/produto", "amazon.com.br power bank", "power bank?tag=outra"):
+            with self.subTest(query=query):
+                with self.assertRaises(HTTPException):
+                    build_affiliate_search_destination(query)
+
     def test_accepts_matching_product_and_tagged_search(self):
         product = "https://www.amazon.com.br/dp/B0ABCDE123?tag=marcosmrego-20"
         self.assertEqual(

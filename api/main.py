@@ -14,7 +14,7 @@ from io import BytesIO
 import unicodedata
 from pathlib import Path
 from contextlib import asynccontextmanager
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -57,6 +57,7 @@ MEDIA_ROOT = Path(
 MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", str(10 * 1024 * 1024)))
 MAX_IMAGE_PIXELS = int(os.getenv("MAX_IMAGE_PIXELS", "12000000"))
 ANALYTICS_COLLECTION_STARTED = datetime(2026, 8, 4, tzinfo=timezone.utc)
+AMAZON_ASSOCIATE_TAG = os.getenv("AMAZON_ASSOCIATE_TAG", "marcosmrego-20").strip()
 
 
 def slugify(value: str, max_length: int = SLUG_MAX_LENGTH) -> str:
@@ -145,7 +146,7 @@ def validate_affiliate_destination(
     parsed = urlparse(url)
     if parsed.scheme != "https" or parsed.hostname not in {"amazon.com.br", "www.amazon.com.br"}:
         raise HTTPException(status_code=422, detail="Destination must be an HTTPS amazon.com.br URL")
-    if parse_qs(parsed.query).get("tag") != ["marcosmrego-20"]:
+    if parse_qs(parsed.query).get("tag") != [AMAZON_ASSOCIATE_TAG]:
         raise HTTPException(status_code=422, detail="Destination must contain the configured affiliate tag")
     if link_type == "product":
         asin = (product_asin or "").strip().upper()
@@ -155,6 +156,24 @@ def validate_affiliate_destination(
         if not path_asins or path_asins[0] != asin:
             raise HTTPException(status_code=422, detail="Destination URL does not match the proposed ASIN")
     return url
+
+
+def build_affiliate_search_destination(query: str) -> Dict[str, str]:
+    """Build a canonical tagged Amazon search URL from plain search terms."""
+    normalized = re.sub(r"\s+", " ", (query or "").strip())
+    if len(normalized) < 3 or len(normalized) > 120:
+        raise HTTPException(status_code=422, detail="Search query must contain 3-120 characters")
+    if re.search(r"[\x00-\x1f\x7f]", normalized) or re.search(
+        r"(?:https?://|www\.|amazon\.|[?&]tag=)", normalized, re.IGNORECASE
+    ):
+        raise HTTPException(status_code=422, detail="Search query must contain plain product terms only")
+    if not AMAZON_ASSOCIATE_TAG:
+        raise HTTPException(status_code=503, detail="Amazon associate tag is not configured")
+    destination = "https://www.amazon.com.br/s?" + urlencode(
+        {"k": normalized, "tag": AMAZON_ASSOCIATE_TAG}
+    )
+    validate_affiliate_destination("search", destination)
+    return {"query": normalized, "destination_url": destination, "link_type": "search"}
 
 
 def analytics_session_hash(value: str) -> str:
@@ -592,6 +611,10 @@ class MonetizationProposalDecision(BaseModel):
     decision: Literal["approve", "reject"]
     reviewer: str = Field(min_length=1, max_length=100)
     note: Optional[str] = Field(default=None, max_length=2000)
+
+
+class AffiliateSearchDestinationCreate(BaseModel):
+    query: str = Field(min_length=3, max_length=120)
 
 
 class TopicSimilarityCheck(BaseModel):
@@ -1810,6 +1833,18 @@ async def decide_review_post(
     if isinstance(result, tuple):
         raise HTTPException(status_code=result[1], detail=result[0]["error"])
     return result
+
+
+@app.post("/api/v1/{tenant_slug}/editorial/monetization/search-destination")
+async def create_affiliate_search_destination(
+    tenant_slug: str,
+    data: AffiliateSearchDestinationCreate,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_content_token(authorization)
+    if tenant_slug != "viralbarato":
+        raise HTTPException(status_code=422, detail="Affiliate search is enabled only for ViralBarato")
+    return build_affiliate_search_destination(data.query)
 
 
 @app.get("/api/v1/{tenant_slug}/editorial/monetization/backlog")
