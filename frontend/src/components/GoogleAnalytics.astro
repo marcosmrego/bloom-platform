@@ -1,14 +1,18 @@
 ---
 import type { SiteConfig } from '../lib/site';
+import SiteAnalytics from './SiteAnalytics.astro';
 
 interface Props {
   config: SiteConfig;
+  postId?: number;
 }
 
-const { config } = Astro.props;
+const { config, postId } = Astro.props;
 const measurementId = config.analyticsMeasurementId?.trim();
 const enabled = Boolean(measurementId && /^G-[A-Z0-9]+$/.test(measurementId));
 ---
+
+<SiteAnalytics postId={postId} />
 
 {enabled && (
   <>

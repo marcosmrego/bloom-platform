@@ -29,6 +29,7 @@ from main import (
     build_affiliate_search_destination,
     agent_review_input_hash,
     AgentEditorialReviewCreate,
+    PageViewCreate,
 )
 
 
@@ -108,6 +109,13 @@ class AgentEditorialReviewContractTests(unittest.TestCase):
 
 
 class AnalyticsValidationTests(unittest.TestCase):
+    def test_page_view_accepts_public_page_without_post(self):
+        payload = PageViewCreate(
+            session_id="550e8400-e29b-41d4-a716-446655440000",
+            path="/categoria/receitas",
+        )
+        self.assertIsNone(payload.post_id)
+
     def test_hashes_valid_session_without_storing_identifier(self):
         value = "550e8400-e29b-41d4-a716-446655440000"
         hashed = analytics_session_hash(value)

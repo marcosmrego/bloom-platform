@@ -733,7 +733,7 @@ class AnalyticsAttribution(BaseModel):
 
 
 class PageViewCreate(AnalyticsAttribution):
-    post_id: int
+    post_id: Optional[int] = None
     path: str
 
 
@@ -1358,15 +1358,51 @@ async def get_editorial_metrics(
                 params,
             )
             posts = [dict(row) for row in cur.fetchall()]
+            overview_params: List[Any] = [period_days]
+            overview_filter = ""
+            if tslug:
+                overview_filter = "AND t.slug = %s"
+                overview_params.append(tslug)
+            cur.execute(
+                f"""
+                SELECT COUNT(*) AS site_views,
+                       COUNT(*) FILTER (WHERE pv.post_id IS NOT NULL) AS article_views,
+                       COUNT(*) FILTER (WHERE pv.post_id IS NULL) AS other_page_views
+                FROM page_views pv
+                JOIN tenants t ON t.id = pv.tenant_id
+                WHERE pv.created_at >= NOW() - (%s * INTERVAL '1 day') {overview_filter}
+                """,
+                overview_params,
+            )
+            overview = dict(cur.fetchone())
             summary = {
                 "published_posts": len(posts),
-                "views": sum(row["views"] for row in posts),
+                "views": overview["site_views"],
+                "site_views": overview["site_views"],
+                "article_views": overview["article_views"],
+                "other_page_views": overview["other_page_views"],
                 "clicks": sum(row["clicks"] for row in posts),
             }
             summary["ctr"] = round(
-                (summary["clicks"] / summary["views"] * 100) if summary["views"] else 0,
+                (summary["clicks"] / summary["article_views"] * 100)
+                if summary["article_views"] else 0,
                 2,
             )
+
+            cur.execute(
+                f"""
+                SELECT t.slug AS tenant_slug, t.name AS tenant_name, pv.path,
+                       COUNT(*) AS views
+                FROM page_views pv
+                JOIN tenants t ON t.id = pv.tenant_id
+                WHERE pv.created_at >= NOW() - (%s * INTERVAL '1 day') {overview_filter}
+                GROUP BY t.slug, t.name, pv.path
+                ORDER BY views DESC, t.slug, pv.path
+                LIMIT 20
+                """,
+                overview_params,
+            )
+            pages = [dict(row) for row in cur.fetchall()]
 
             source_params: List[Any] = [period_days]
             source_filter = ""
@@ -1416,6 +1452,7 @@ async def get_editorial_metrics(
                 "tenant_slug": tslug,
                 "summary": summary,
                 "posts": posts,
+                "pages": pages,
                 "sources": sources,
                 "alerts": alerts,
                 "alert_summary": {
@@ -2536,19 +2573,28 @@ async def register_page_view(tenant_slug: str, data: PageViewCreate):
         conn = get_db()
         try:
             cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT p.id, p.tenant_id, t.domain
-                FROM posts p JOIN tenants t ON t.id = p.tenant_id
-                WHERE t.slug = %s AND p.id = %s AND p.status = 'published'
-                """,
-                (tslug, payload.post_id),
-            )
-            post = cur.fetchone()
-            if not post:
-                return {"error": "Published post not found"}, 404
+            if payload.post_id is not None:
+                cur.execute(
+                    """
+                    SELECT p.id, p.tenant_id, t.domain
+                    FROM posts p JOIN tenants t ON t.id = p.tenant_id
+                    WHERE t.slug = %s AND p.id = %s AND p.status = 'published'
+                    """,
+                    (tslug, payload.post_id),
+                )
+                page = cur.fetchone()
+                if not page:
+                    return {"error": "Published post not found"}, 404
+            else:
+                cur.execute(
+                    "SELECT id AS tenant_id, domain FROM tenants WHERE slug = %s AND status = 'active'",
+                    (tslug,),
+                )
+                page = cur.fetchone()
+                if not page:
+                    return {"error": "Tenant not found"}, 404
             source_host = analytics_host(payload.source_url)
-            if source_host and source_host not in {post["domain"], f"www.{post['domain']}"}:
+            if source_host and source_host not in {page["domain"], f"www.{page['domain']}"}:
                 return {"error": "Source URL does not match tenant"}, 422
             cur.execute(
                 """
@@ -2560,7 +2606,7 @@ async def register_page_view(tenant_slug: str, data: PageViewCreate):
                 RETURNING id
                 """,
                 (
-                    post["tenant_id"], payload.post_id, normalized["session_hash"],
+                    page["tenant_id"], payload.post_id, normalized["session_hash"],
                     safe_path, normalized["referrer_host"], normalized["utm_source"],
                     normalized["utm_medium"], normalized["utm_campaign"],
                     normalized["utm_content"], normalized["utm_term"],

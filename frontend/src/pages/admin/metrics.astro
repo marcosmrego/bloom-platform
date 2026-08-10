@@ -41,6 +41,8 @@ export const prerender = false;
       .tenant { display: inline-block; padding: .2rem .5rem; border-radius: 999px; background: #edf2ff; color: #3451a4; font-size: .72rem; }
       .sources { list-style: none; padding: 0; margin: 0; }
       .sources li { display: flex; justify-content: space-between; gap: 1rem; padding: .7rem 0; border-bottom: 1px solid #edf0f5; }
+      .aside-section + .aside-section { margin-top: 1.4rem; padding-top: 1.2rem; border-top: 1px solid #e5eaf2; }
+      .path { min-width: 0; overflow-wrap: anywhere; }
       .empty { color: #768198; padding: 2rem; text-align: center; }
       .importer { margin-top: 1rem; }
       .importer form { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: .75rem; align-items: end; }
@@ -89,7 +91,7 @@ export const prerender = false;
     <main>
       <section class="cards">
         <article class="card"><span>Artigos publicados</span><strong id="posts">—</strong></article>
-        <article class="card"><span>Visitas nos artigos</span><strong id="views">—</strong><small>sessões únicas por artigo/dia; não inclui home</small></article>
+        <article class="card"><span>Visitas no site</span><strong id="views">—</strong><small id="view-breakdown">— em artigos</small></article>
         <article class="card"><span>Cliques afiliados</span><strong id="clicks">—</strong></article>
         <article class="card"><span>CTR afiliado</span><strong id="ctr">—</strong></article>
         <article class="card"><span>Receita</span><strong id="revenue">—</strong><small id="finance-status">aguardando importação</small></article>
@@ -126,7 +128,7 @@ export const prerender = false;
       </section>
       <section class="layout">
         <article class="panel"><div class="panel-head"><h2>Desempenho por artigo</h2><span class="panel-meta">Mais visitados primeiro</span></div><div class="table-wrap"><table><thead><tr><th>Artigo</th><th>Tenant</th><th class="numeric">Visitas</th><th class="numeric">Cliques</th><th class="numeric">CTR</th><th class="numeric">Receita</th><th class="numeric">Resultado</th></tr></thead><tbody id="rows"></tbody></table></div><div id="empty" class="empty" hidden>Nenhum artigo encontrado.</div><nav id="article-pager" class="pager" aria-label="Paginação do desempenho por artigo"><span id="article-page-status" class="pager-status" aria-live="polite"></span><div class="pager-actions"><button type="button" data-page="article" data-direction="previous">Anterior</button><button type="button" data-page="article" data-direction="next">Próxima</button></div></nav></article>
-        <aside class="panel"><h2>Principais origens</h2><ul id="sources" class="sources"></ul></aside>
+        <aside class="panel"><div class="aside-section"><h2>Páginas mais acessadas</h2><ul id="pages" class="sources"></ul></div><div class="aside-section"><h2>Principais origens</h2><ul id="sources" class="sources"></ul></div></aside>
       </section>
     </main>
     <script>
@@ -192,6 +194,7 @@ export const prerender = false;
         const data = await response.json();
         document.querySelector('#posts').textContent = number.format(data.summary.published_posts);
         document.querySelector('#views').textContent = number.format(data.summary.views);
+        document.querySelector('#view-breakdown').textContent = `${number.format(data.summary.article_views)} em artigos · ${number.format(data.summary.other_page_views)} em outras páginas`;
         document.querySelector('#clicks').textContent = number.format(data.summary.clicks);
         document.querySelector('#ctr').textContent = `${Number(data.summary.ctr).toLocaleString('pt-BR')}%`;
         document.querySelector('#revenue').textContent = money.format(Number(data.finance.revenue));
@@ -209,6 +212,9 @@ export const prerender = false;
         document.querySelector('#sources').innerHTML = data.sources.length
           ? data.sources.map((source) => `<li><span>${escapeHtml(source.source)}</span><strong>${number.format(source.views)}</strong></li>`).join('')
           : '<li class="empty">Dados de origem aparecerão após as primeiras visitas.</li>';
+        document.querySelector('#pages').innerHTML = data.pages.length
+          ? data.pages.slice(0, 10).map((page) => `<li><span class="path">${escapeHtml(page.path)} <small class="tenant">${escapeHtml(page.tenant_name)}</small></span><strong>${number.format(page.views)}</strong></li>`).join('')
+          : '<li class="empty">As páginas mais acessadas aparecerão após novas visitas.</li>';
       }
       document.querySelector('#proposal-list').addEventListener('click', (event) => {
         const button = event.target.closest('button[data-proposal]');

@@ -1,0 +1,40 @@
+---
+interface Props {
+  postId?: number;
+}
+
+const { postId } = Astro.props;
+---
+
+<script is:inline define:vars={{ postId }}>
+  (() => {
+    const storageKey = 'bloom_analytics_session';
+    let sessionId = localStorage.getItem(storageKey);
+    if (!sessionId) {
+      sessionId = globalThis.crypto?.randomUUID?.()
+        || `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+      localStorage.setItem(storageKey, sessionId);
+    }
+    globalThis.__bloomAnalyticsSession = sessionId;
+
+    const params = new URLSearchParams(location.search);
+    const attribution = {};
+    for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term']) {
+      attribution[key] = params.get(key);
+    }
+    const payload = {
+      ...(postId ? { post_id: postId } : {}),
+      session_id: sessionId,
+      path: location.pathname,
+      source_url: location.href,
+      referrer: document.referrer || null,
+      ...attribution,
+    };
+    const body = JSON.stringify(payload);
+    if (!navigator.sendBeacon('/api/analytics/page-view', new Blob([body], { type: 'application/json' }))) {
+      fetch('/api/analytics/page-view', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true,
+      }).catch(() => {});
+    }
+  })();
+</script>

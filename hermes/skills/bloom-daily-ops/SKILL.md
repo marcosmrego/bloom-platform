@@ -28,9 +28,14 @@ retornados por elas.
 1. Chame `bloom_performance_metrics` com `days=7`, sem filtro de tenant.
 2. Classifique os dados conforme a disciplina de evidência da skill
    `bloom-operations`.
-3. Relate resumo de visitas, cliques, CTR, estado financeiro e alertas por
-   prioridade. Destaque posts afetados e a ação humana recomendada.
-4. Não estime custos do Hermes a partir dessas métricas e não altere conteúdo,
+3. Relate `site_views`, `article_views`, `other_page_views`, cliques, CTR,
+   estado financeiro e alertas por prioridade. Use `pages` para destacar os
+   caminhos e tenants com maior tráfego, diferenciando interesse na home ou em
+   categorias de engajamento efetivo nos artigos.
+4. Destaque posts afetados e a ação humana recomendada. Não conclua que um
+   tenant está sem audiência apenas porque `article_views=0` quando existem
+   acessos em outras páginas.
+5. Não estime custos do Hermes a partir dessas métricas e não altere conteúdo,
    monetização, configuração ou agenda.
 
 ## Controles de execução

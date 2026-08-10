@@ -50,7 +50,7 @@ const articleJsonLd = {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <SeoHead config={tenantConfig} title={seoTitle} description={seoDescription} path={`/blog/${encodeURIComponent(post.slug)}`} image={heroImage} type="article" publishedTime={post.published_at} modifiedTime={post.updated_at} jsonLd={articleJsonLd} />
-  <GoogleAnalytics config={tenantConfig} />
+  <GoogleAnalytics config={tenantConfig} postId={post.id} />
   <MonetizationHead />
   <style define:vars={{ accent: tenantConfig.accent }}>
     :root { --accent: var(--accent-custom, #e63946); }
@@ -172,12 +172,11 @@ const articleJsonLd = {
   <SiteFooter config={tenantConfig} />
   <script is:inline define:vars={{ postId: post.id }}>
     (() => {
-      const storageKey = 'bloom_analytics_session';
-      let sessionId = localStorage.getItem(storageKey);
+      let sessionId = globalThis.__bloomAnalyticsSession || localStorage.getItem('bloom_analytics_session');
       if (!sessionId) {
         sessionId = globalThis.crypto?.randomUUID?.()
           || `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-        localStorage.setItem(storageKey, sessionId);
+        localStorage.setItem('bloom_analytics_session', sessionId);
       }
 
       const params = new URLSearchParams(location.search);
@@ -185,21 +184,6 @@ const articleJsonLd = {
       for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term']) {
         attribution[key] = params.get(key);
       }
-      const payload = {
-        post_id: postId,
-        session_id: sessionId,
-        path: location.pathname,
-        source_url: location.href,
-        referrer: document.referrer || null,
-        ...attribution,
-      };
-      const body = JSON.stringify(payload);
-      if (!navigator.sendBeacon('/api/analytics/page-view', new Blob([body], { type: 'application/json' }))) {
-        fetch('/api/analytics/page-view', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true,
-        }).catch(() => {});
-      }
-
       const affiliateLink = document.querySelector('[data-affiliate-link]');
       const prepareAffiliateLink = () => {
         if (!(affiliateLink instanceof HTMLAnchorElement)) return;
