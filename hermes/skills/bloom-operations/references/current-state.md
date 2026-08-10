@@ -62,3 +62,10 @@ Snapshot validado pelo operador contra repositório e produção em 05/08/2026.
   idempotência ao índice por caminho. O smoke test registrou eventos de home e
   categoria nos dois tenants, confirmou sua leitura pelo Hermes e removeu os
   quatro registros sintéticos; nenhum dado de teste permaneceu no banco.
+- Em 10/08/2026, a skill `bloom-social-video` e o renderizador vertical
+  determinístico foram instalados no perfil Bloom. O cron
+  `bloom-daily-tiktok-video` (`f05bdcb68fd8`) executa diariamente às `14:00 UTC`
+  e produz, sem publicar, um pacote persistente com MP4 `1080x1920`, capa,
+  legenda, manifesto de origem e faixa AAC silenciosa. A execução piloto gerou
+  e validou o pacote de 10/08/2026 a partir do post 58; a publicação no TikTok
+  permanece manual.

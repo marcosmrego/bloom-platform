@@ -1,0 +1,17 @@
+{
+  "tenant": "viralbarato",
+  "profile": "@viralbarato5",
+  "title": "Três perguntas antes de comprar",
+  "source_post_id": 58,
+  "source_url": "https://viralbarato.com.br/blog/exemplo",
+  "selection_reason": "Exemplo local para validação do renderizador",
+  "caption": "Antes de comprar, compare o que realmente muda no uso diário.",
+  "hashtags": ["ViralBarato", "DicasDeCompra", "CustoBeneficio"],
+  "scenes": [
+    {"duration": 4, "text": "Vai comprar? Faça estas 3 perguntas", "image": "scene-01.png"},
+    {"duration": 4, "text": "Isso resolve o seu uso real?", "image": "scene-02.png"},
+    {"duration": 4, "text": "O recurso extra vale a diferença?", "image": "scene-03.png"},
+    {"duration": 4, "text": "A manutenção cabe na rotina?", "image": "scene-04.png"},
+    {"duration": 4, "text": "Salve para comparar com calma", "image": "scene-05.png"}
+  ]
+}
