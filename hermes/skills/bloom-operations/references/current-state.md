@@ -35,3 +35,14 @@ Snapshot validado pelo operador contra repositório e produção em 05/08/2026.
 - O piloto de 05/08/2026 revisou o post 59 e criou o relatório 1 com
   recomendação `pass`, risco `low` e seis checks aprovados. O post permaneceu em
   `draft`; esse resultado continua aguardando decisão humana.
+- Em 10/08/2026, o cron antigo `bloom-editorial-first-pass-review`
+  (`ef4df3064a9c`) foi pausado e preservado para rollback. Ele foi substituído
+  pelo cron `bloom-daily-editorial-ops` (`dabd5e1dd31e`), executado diariamente
+  às `13:10 UTC`. A nova rotina aplica o contrato do `bloom-reviewer`, consulta
+  métricas de sete dias por ferramenta somente-leitura e produz relatório
+  consolidado; aprovação e publicação continuam humanas.
+- A validação direta de 10/08/2026 confirmou backlog editorial vazio nos dois
+  tenants e acesso às métricas. O snapshot observado foi 2 visitas, 1 clique,
+  CTR de 50% sobre amostra mínima, financeiro `awaiting_import` e 70 alertas de
+  prioridade média. Revalidar esses números pela ferramenta antes de tratá-los
+  como estado atual.
