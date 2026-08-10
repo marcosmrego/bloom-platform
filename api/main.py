@@ -2602,7 +2602,7 @@ async def register_page_view(tenant_slug: str, data: PageViewCreate):
                     (tenant_id, post_id, session_hash, path, referrer_host,
                      utm_source, utm_medium, utm_campaign, utm_content, utm_term)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (tenant_id, post_id, session_hash, view_date) DO NOTHING
+                ON CONFLICT DO NOTHING
                 RETURNING id
                 """,
                 (
