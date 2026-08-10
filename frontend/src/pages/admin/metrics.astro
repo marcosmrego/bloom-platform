@@ -10,10 +10,10 @@ export const prerender = false;
     <meta name="robots" content="noindex, nofollow, noarchive" />
     <title>Métricas · Bloom</title>
     <style>
-      :root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #172033; background: #f3f5f9; }
+      :root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #172033; background: #eef2f7; }
       * { box-sizing: border-box; }
       body { margin: 0; }
-      header { padding: 1.2rem clamp(1rem, 4vw, 3rem); background: #172033; color: white; display: flex; gap: 1.5rem; align-items: end; justify-content: space-between; flex-wrap: wrap; }
+      header { padding: 1.35rem clamp(1rem, 4vw, 3rem); background: linear-gradient(120deg, #172033, #263a67); color: white; display: flex; gap: 1.5rem; align-items: end; justify-content: space-between; flex-wrap: wrap; box-shadow: 0 8px 28px rgba(23, 32, 51, .18); }
       header h1 { margin: .2rem 0 0; font-size: 1.7rem; }
       header p { margin: 0; color: #aeb8cc; font-size: .85rem; text-transform: uppercase; letter-spacing: .08em; }
       header a { color: white; }
@@ -22,14 +22,16 @@ export const prerender = false;
       select { min-width: 130px; padding: .6rem .75rem; border: 1px solid #47536a; border-radius: 8px; background: #242f45; color: white; }
       main { padding: 1.5rem clamp(1rem, 4vw, 3rem) 3rem; max-width: 1500px; margin: auto; }
       .cards { display: grid; grid-template-columns: repeat(7, minmax(140px, 1fr)); gap: 1rem; }
-      .card, .panel { background: white; border: 1px solid #dfe4ed; border-radius: 14px; box-shadow: 0 4px 14px rgba(28, 39, 60, .05); }
+      .card, .panel { background: white; border: 1px solid #dfe4ed; border-radius: 16px; box-shadow: 0 8px 24px rgba(28, 39, 60, .06); }
       .card { padding: 1.1rem; }
       .card span { color: #6d7890; font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
       .card strong { display: block; margin-top: .35rem; font-size: 1.8rem; }
       .card small { color: #8b95a8; }
       .layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(230px, 1fr); gap: 1rem; margin-top: 1rem; }
       .panel { padding: 1rem; overflow: hidden; }
-      .panel h2 { font-size: 1rem; margin: 0 0 1rem; }
+      .panel-head { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+      .panel h2 { font-size: 1rem; margin: 0; }
+      .panel-meta { color: #768198; font-size: .78rem; }
       .table-wrap { overflow-x: auto; }
       table { width: 100%; border-collapse: collapse; font-size: .88rem; }
       th, td { padding: .75rem .65rem; border-bottom: 1px solid #edf0f5; text-align: left; }
@@ -56,6 +58,13 @@ export const prerender = false;
       .alert-badge { font-size: .68rem; font-weight: 700; text-transform: uppercase; }
       .alert strong, .alert small { display: block; }
       .alert small { margin-top: .2rem; color: #667188; }
+      .pager { display: flex; justify-content: space-between; align-items: center; gap: .8rem; margin-top: 1rem; padding-top: .85rem; border-top: 1px solid #edf0f5; }
+      .pager-status { color: #667188; font-size: .78rem; font-variant-numeric: tabular-nums; }
+      .pager-actions { display: flex; gap: .45rem; }
+      .pager button { border: 1px solid #cfd7e5; border-radius: 8px; padding: .48rem .72rem; background: white; color: #263a67; font-weight: 650; cursor: pointer; }
+      .pager button:hover:not(:disabled) { border-color: #6681bd; background: #f4f7ff; }
+      .pager button:focus-visible { outline: 3px solid rgba(76, 111, 179, .28); outline-offset: 2px; }
+      .pager button:disabled { cursor: not-allowed; opacity: .42; }
       .proposal-list { display: grid; gap: .8rem; }
       .proposal { padding: 1rem; border: 1px solid #e1e6ef; border-radius: 10px; display: grid; grid-template-columns: 1fr auto; gap: 1rem; }
       .proposal h3 { margin: 0 0 .35rem; font-size: .95rem; }
@@ -65,6 +74,7 @@ export const prerender = false;
       .proposal-actions button { border: 0; border-radius: 8px; padding: .6rem .8rem; cursor: pointer; color: white; background: #263a67; }
       .proposal-actions .reject { background: #9f3535; }
       @media (max-width: 900px) { .cards { grid-template-columns: repeat(2, 1fr); } .layout { grid-template-columns: 1fr; } }
+      @media (max-width: 560px) { .cards { grid-template-columns: 1fr; } .pager { align-items: flex-start; flex-direction: column; } .pager-actions, .pager button { width: 100%; } }
     </style>
   </head>
   <body>
@@ -79,7 +89,7 @@ export const prerender = false;
     <main>
       <section class="cards">
         <article class="card"><span>Artigos publicados</span><strong id="posts">—</strong></article>
-        <article class="card"><span>Visitas identificadas</span><strong id="views">—</strong><small>sessões únicas por artigo/dia</small></article>
+        <article class="card"><span>Visitas nos artigos</span><strong id="views">—</strong><small>sessões únicas por artigo/dia; não inclui home</small></article>
         <article class="card"><span>Cliques afiliados</span><strong id="clicks">—</strong></article>
         <article class="card"><span>CTR afiliado</span><strong id="ctr">—</strong></article>
         <article class="card"><span>Receita</span><strong id="revenue">—</strong><small id="finance-status">aguardando importação</small></article>
@@ -87,8 +97,12 @@ export const prerender = false;
         <article class="card"><span>Resultado</span><strong id="result">—</strong></article>
       </section>
       <section class="panel alerts">
-        <h2>Alertas e ações recomendadas <span id="alert-count" class="tenant">0</span></h2>
+        <div class="panel-head"><h2>Alertas e ações recomendadas <span id="alert-count" class="tenant">0</span></h2><span class="panel-meta">Ordenados por prioridade</span></div>
         <div id="alert-list" class="alert-list"></div>
+        <nav id="alert-pager" class="pager" aria-label="Paginação dos alertas">
+          <span id="alert-page-status" class="pager-status" aria-live="polite"></span>
+          <div class="pager-actions"><button type="button" data-page="alert" data-direction="previous">Anterior</button><button type="button" data-page="alert" data-direction="next">Próxima</button></div>
+        </nav>
       </section>
       <section class="panel alerts">
         <h2>Propostas de monetização do Hermes <span id="proposal-count" class="tenant">0</span></h2>
@@ -111,7 +125,7 @@ export const prerender = false;
         </form>
       </section>
       <section class="layout">
-        <article class="panel"><h2>Desempenho por artigo</h2><div class="table-wrap"><table><thead><tr><th>Artigo</th><th>Tenant</th><th class="numeric">Visitas</th><th class="numeric">Cliques</th><th class="numeric">CTR</th><th class="numeric">Receita</th><th class="numeric">Resultado</th></tr></thead><tbody id="rows"></tbody></table></div><div id="empty" class="empty" hidden>Nenhum artigo encontrado.</div></article>
+        <article class="panel"><div class="panel-head"><h2>Desempenho por artigo</h2><span class="panel-meta">Mais visitados primeiro</span></div><div class="table-wrap"><table><thead><tr><th>Artigo</th><th>Tenant</th><th class="numeric">Visitas</th><th class="numeric">Cliques</th><th class="numeric">CTR</th><th class="numeric">Receita</th><th class="numeric">Resultado</th></tr></thead><tbody id="rows"></tbody></table></div><div id="empty" class="empty" hidden>Nenhum artigo encontrado.</div><nav id="article-pager" class="pager" aria-label="Paginação do desempenho por artigo"><span id="article-page-status" class="pager-status" aria-live="polite"></span><div class="pager-actions"><button type="button" data-page="article" data-direction="previous">Anterior</button><button type="button" data-page="article" data-direction="next">Próxima</button></div></nav></article>
         <aside class="panel"><h2>Principais origens</h2><ul id="sources" class="sources"></ul></aside>
       </section>
     </main>
@@ -121,6 +135,34 @@ export const prerender = false;
       const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
       const number = new Intl.NumberFormat('pt-BR');
       const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+      const pageSize = { alert: 8, article: 10 };
+      const currentPage = { alert: 1, article: 1 };
+      let metricData = { alerts: [], posts: [] };
+      const pageSlice = (items, type) => items.slice((currentPage[type] - 1) * pageSize[type], currentPage[type] * pageSize[type]);
+      function updatePager(type, total) {
+        const totalPages = Math.max(1, Math.ceil(total / pageSize[type]));
+        currentPage[type] = Math.min(currentPage[type], totalPages);
+        const start = total ? (currentPage[type] - 1) * pageSize[type] + 1 : 0;
+        const end = Math.min(currentPage[type] * pageSize[type], total);
+        document.querySelector(`#${type}-page-status`).textContent = total
+          ? `${number.format(start)}–${number.format(end)} de ${number.format(total)} · página ${currentPage[type]} de ${totalPages}`
+          : 'Nenhum item';
+        const pager = document.querySelector(`#${type}-pager`);
+        pager.querySelector('[data-direction="previous"]').disabled = currentPage[type] <= 1;
+        pager.querySelector('[data-direction="next"]').disabled = currentPage[type] >= totalPages;
+        pager.hidden = total <= pageSize[type];
+      }
+      function renderAlerts() {
+        document.querySelector('#alert-list').innerHTML = metricData.alerts.length
+          ? pageSlice(metricData.alerts, 'alert').map((item) => `<article class="alert ${escapeHtml(item.priority)}"><span class="alert-badge">${item.priority === 'high' ? 'Alta' : item.priority === 'medium' ? 'Média' : 'Baixa'}</span><div><strong>${escapeHtml(item.title)} · ${escapeHtml(item.post_title)}</strong><small>${escapeHtml(item.action)}</small></div></article>`).join('')
+          : '<div class="empty">Nenhuma ação necessária com os dados atuais.</div>';
+        updatePager('alert', metricData.alerts.length);
+      }
+      function renderArticles() {
+        document.querySelector('#rows').innerHTML = pageSlice(metricData.posts, 'article').map((post) => `<tr><td class="post-title">${escapeHtml(post.title)}</td><td><span class="tenant">${escapeHtml(post.tenant_name)}</span></td><td class="numeric">${number.format(post.views)}</td><td class="numeric">${number.format(post.clicks)}</td><td class="numeric">${Number(post.ctr).toLocaleString('pt-BR')}%</td><td class="numeric">${money.format(Number(post.revenue))}</td><td class="numeric">${money.format(Number(post.result))}</td></tr>`).join('');
+        document.querySelector('#empty').hidden = metricData.posts.length > 0;
+        updatePager('article', metricData.posts.length);
+      }
       async function loadProposals() {
         const query = new URLSearchParams({ status: 'pending' });
         if (tenant.value) query.set('tenant_slug', tenant.value);
@@ -159,12 +201,11 @@ export const prerender = false;
           ? `${money.format(Number(data.finance.unattributed_revenue))} sem atribuição a artigo`
           : 'aguardando importação';
         document.querySelector('#alert-count').textContent = number.format(data.alert_summary.total);
-        document.querySelector('#alert-list').innerHTML = data.alerts.length
-          ? data.alerts.map((item) => `<article class="alert ${escapeHtml(item.priority)}"><span class="alert-badge">${item.priority === 'high' ? 'Alta' : item.priority === 'medium' ? 'Média' : 'Baixa'}</span><div><strong>${escapeHtml(item.title)} · ${escapeHtml(item.post_title)}</strong><small>${escapeHtml(item.action)}</small></div></article>`).join('')
-          : '<div class="empty">Nenhuma ação necessária com os dados atuais.</div>';
-        const rows = document.querySelector('#rows');
-        rows.innerHTML = data.posts.map((post) => `<tr><td class="post-title">${escapeHtml(post.title)}</td><td><span class="tenant">${escapeHtml(post.tenant_name)}</span></td><td class="numeric">${number.format(post.views)}</td><td class="numeric">${number.format(post.clicks)}</td><td class="numeric">${Number(post.ctr).toLocaleString('pt-BR')}%</td><td class="numeric">${money.format(Number(post.revenue))}</td><td class="numeric">${money.format(Number(post.result))}</td></tr>`).join('');
-        document.querySelector('#empty').hidden = data.posts.length > 0;
+        metricData = { alerts: data.alerts, posts: data.posts };
+        currentPage.alert = 1;
+        currentPage.article = 1;
+        renderAlerts();
+        renderArticles();
         document.querySelector('#sources').innerHTML = data.sources.length
           ? data.sources.map((source) => `<li><span>${escapeHtml(source.source)}</span><strong>${number.format(source.views)}</strong></li>`).join('')
           : '<li class="empty">Dados de origem aparecerão após as primeiras visitas.</li>';
@@ -174,6 +215,14 @@ export const prerender = false;
         if (!button) return;
         decideProposal(Number(button.dataset.proposal), button.dataset.decision).catch((error) => alert(error.message));
       });
+      document.querySelectorAll('.pager').forEach((pager) => pager.addEventListener('click', (event) => {
+        const button = event.target.closest('button[data-page]');
+        if (!button || button.disabled) return;
+        const type = button.dataset.page;
+        currentPage[type] += button.dataset.direction === 'next' ? 1 : -1;
+        type === 'alert' ? renderAlerts() : renderArticles();
+        pager.closest('.panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }));
       tenant.addEventListener('change', () => Promise.all([load(), loadProposals()]).catch(alert));
       days.addEventListener('change', () => load().catch(alert));
       const financialForm = document.querySelector('#financial-form');
