@@ -24,8 +24,8 @@ Snapshot validado pelo operador contra repositório e produção em 05/08/2026.
   eleição, health check e idempotência entre produtores.
 - Não existe medição confirmada de custo diário dos crons. O valor de
   US$ 0,50/dia citado anteriormente é uma hipótese sem base suficiente.
-- O manifesto `plugin.yaml` versão 1.2.0 declara as mesmas nove ferramentas
-  registradas pelo plugin.
+- O manifesto `plugin.yaml` versão 1.3.0 inclui a ferramenta somente-leitura
+  `bloom_performance_metrics`, além das ferramentas editoriais já registradas.
 - O revisor editorial de primeira passagem está implementado pela skill
   `bloom-reviewer`. Ele lê drafts e envia pareceres estruturados; não edita,
   aprova, rejeita, arquiva nem publica. Alterações humanas invalidam o parecer
@@ -46,3 +46,10 @@ Snapshot validado pelo operador contra repositório e produção em 05/08/2026.
   CTR de 50% sobre amostra mínima, financeiro `awaiting_import` e 70 alertas de
   prioridade média. Revalidar esses números pela ferramenta antes de tratá-los
   como estado atual.
+- Em 10/08/2026, os dois frontends públicos foram implantados no commit
+  `7ad8953`. O arquivo `google9647fb0ea351262d.html` retorna HTTP 200 em
+  `viralbarato.com.br` e `mundonoprato.com.br`; os dois `robots.txt` permitem
+  indexação de busca e apontam para sitemaps tenant-aware; os sitemaps e
+  canonicals foram validados em produção. A confirmação das propriedades e o
+  envio dos sitemaps dentro do Google Search Console continuam pendentes de uma
+  sessão autenticada do proprietário ou credencial específica da API.
