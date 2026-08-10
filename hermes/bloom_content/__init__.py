@@ -244,6 +244,28 @@ def _handle_editorial_review_backlog(args: dict, **_kwargs) -> str:
         return tool_error(f"Bloom editorial review backlog failed: {exc}")
 
 
+def _handle_performance_metrics(args: dict, **_kwargs) -> str:
+    try:
+        tenant_value = args.get("tenant")
+        tenant = _tenant(tenant_value) if tenant_value else None
+        days = int(args.get("days") or 7)
+        if days not in {7, 30, 90}:
+            raise ValueError("days must be 7, 30 or 90")
+        base_url, _token = _config()
+        params: dict[str, Any] = {"days": days}
+        if tenant:
+            params["tenant_slug"] = tenant
+        response = requests.get(
+            f"{base_url}/api/v1/editorial/review/metrics",
+            headers=_headers(), params=params, timeout=TIMEOUT,
+        )
+        payload = _json_response(response)
+        payload["success"] = True
+        return tool_result(payload)
+    except Exception as exc:
+        return tool_error(f"Bloom performance metrics failed: {exc}")
+
+
 def _handle_submit_editorial_review(args: dict, **_kwargs) -> str:
     try:
         tenant = _tenant(args.get("tenant"))
@@ -448,6 +470,18 @@ BLOOM_EDITORIAL_REVIEW_BACKLOG_SCHEMA = {
     },
 }
 
+BLOOM_PERFORMANCE_METRICS_SCHEMA = {
+    "name": "bloom_performance_metrics",
+    "description": "Read Bloom traffic, CTR, finance status and actionable alerts. This tool is read-only.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tenant": {"type": "string", "enum": sorted(ALLOWED_TENANTS)},
+            "days": {"type": "integer", "enum": [7, 30, 90]},
+        },
+    },
+}
+
 
 BLOOM_SUBMIT_EDITORIAL_REVIEW_SCHEMA = {
     "name": "bloom_submit_editorial_review",
@@ -571,6 +605,7 @@ def register(ctx) -> None:
         ("bloom_build_affiliate_search", BLOOM_BUILD_AFFILIATE_SEARCH_SCHEMA, _handle_build_affiliate_search),
         ("bloom_propose_monetization", BLOOM_PROPOSE_MONETIZATION_SCHEMA, _handle_propose_monetization),
         ("bloom_editorial_review_backlog", BLOOM_EDITORIAL_REVIEW_BACKLOG_SCHEMA, _handle_editorial_review_backlog),
+        ("bloom_performance_metrics", BLOOM_PERFORMANCE_METRICS_SCHEMA, _handle_performance_metrics),
         ("bloom_submit_editorial_review", BLOOM_SUBMIT_EDITORIAL_REVIEW_SCHEMA, _handle_submit_editorial_review),
         ("bloom_upload_media", BLOOM_UPLOAD_MEDIA_SCHEMA, _handle_upload_media),
         ("bloom_create_draft", BLOOM_CREATE_DRAFT_SCHEMA, _handle_create_draft),

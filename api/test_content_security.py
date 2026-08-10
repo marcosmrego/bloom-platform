@@ -251,6 +251,23 @@ class ContentTokenTests(unittest.TestCase):
                 main.require_review_token("Bearer anything")
             self.assertEqual(raised.exception.status_code, 503)
 
+    def test_metrics_accepts_review_or_restricted_automation_token(self):
+        with (
+            patch.object(main, "CONTENT_API_TOKEN", "automation-secret"),
+            patch.object(main, "REVIEW_API_TOKEN", "review-secret"),
+        ):
+            main.require_metrics_token("Bearer automation-secret")
+            main.require_metrics_token("Bearer review-secret")
+
+    def test_metrics_rejects_unknown_token(self):
+        with (
+            patch.object(main, "CONTENT_API_TOKEN", "automation-secret"),
+            patch.object(main, "REVIEW_API_TOKEN", "review-secret"),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                main.require_metrics_token("Bearer wrong")
+            self.assertEqual(raised.exception.status_code, 401)
+
 
 class IdempotencyTests(unittest.TestCase):
     def test_accepts_safe_key(self):

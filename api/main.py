@@ -124,6 +124,22 @@ def require_review_token(authorization: Optional[str]) -> None:
         raise HTTPException(status_code=401, detail="Invalid review token")
 
 
+def require_metrics_token(authorization: Optional[str]) -> None:
+    """Allow either reviewer UI or restricted automation to read metrics."""
+    scheme, separator, supplied = (authorization or "").partition(" ")
+    configured_tokens = [token for token in (REVIEW_API_TOKEN, CONTENT_API_TOKEN) if token]
+    if not configured_tokens:
+        raise HTTPException(status_code=503, detail="Metrics API is not configured")
+    valid = (
+        separator == " "
+        and scheme.lower() == "bearer"
+        and bool(supplied)
+        and any(secrets.compare_digest(supplied, token) for token in configured_tokens)
+    )
+    if not valid:
+        raise HTTPException(status_code=401, detail="Invalid metrics token")
+
+
 def validate_idempotency_key(value: Optional[str]) -> str:
     key = (value or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}", key):
@@ -1286,7 +1302,7 @@ async def get_editorial_metrics(
     days: int = 30,
     authorization: Optional[str] = Header(default=None),
 ):
-    require_review_token(authorization)
+    require_metrics_token(authorization)
     if days not in {7, 30, 90}:
         raise HTTPException(status_code=422, detail="Days must be 7, 30 or 90")
 
