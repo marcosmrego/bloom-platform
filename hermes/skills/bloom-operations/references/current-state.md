@@ -53,3 +53,12 @@ Snapshot validado pelo operador contra repositório e produção em 05/08/2026.
   canonicals foram validados em produção. A confirmação das propriedades e o
   envio dos sitemaps dentro do Google Search Console continuam pendentes de uma
   sessão autenticada do proprietário ou credencial específica da API.
+- Em 10/08/2026, a coleta interna de analytics foi ampliada para todas as
+  páginas públicas no commit `da1f23f`. O painel e a ferramenta do Hermes agora
+  separam `site_views`, `article_views` e `other_page_views`, além de listar os
+  caminhos mais acessados. O commit `9ed3247` moveu a ingestão pública para
+  `/track/page-view`, pois o namespace `/api` do Mundo no Prato era interceptado
+  por um serviço legado de newsletter. O commit `184ca13` alinhou a
+  idempotência ao índice por caminho. O smoke test registrou eventos de home e
+  categoria nos dois tenants, confirmou sua leitura pelo Hermes e removeu os
+  quatro registros sintéticos; nenhum dado de teste permaneceu no banco.
