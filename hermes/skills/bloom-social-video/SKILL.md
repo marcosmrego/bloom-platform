@@ -55,6 +55,9 @@ revisão humana; esta skill nunca publica, autentica ou interage com o TikTok.
 ## Gates editoriais
 
 - O assunto deriva de post realmente publicado e a URL pertence ao tenant.
+- Pauta sazonal só pode ser usada antes ou durante a janela da ocasião. Depois
+  da data, transforme o aprendizado em conteúdo evergreen ou escolha outro
+  post; nunca publique chamada de presente, urgência ou evento vencido.
 - Não incluir preço, cupom ou disponibilidade sem verificação atual.
 - Não alegar teste físico, experiência pessoal, garantia de economia ou saúde.
 - Conteúdo de saúde, alimentação e segurança exige fonte oficial já presente
