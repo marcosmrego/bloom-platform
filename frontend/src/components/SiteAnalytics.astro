@@ -31,8 +31,8 @@ const { postId } = Astro.props;
       ...attribution,
     };
     const body = JSON.stringify(payload);
-    if (!navigator.sendBeacon('/api/analytics/page-view', new Blob([body], { type: 'application/json' }))) {
-      fetch('/api/analytics/page-view', {
+    if (!navigator.sendBeacon('/track/page-view', new Blob([body], { type: 'application/json' }))) {
+      fetch('/track/page-view', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true,
       }).catch(() => {});
     }
