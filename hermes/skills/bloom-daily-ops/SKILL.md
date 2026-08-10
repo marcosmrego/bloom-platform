@@ -5,17 +5,23 @@ description: Orquestra a rotina diária segura do Bloom, delegando revisão edit
 
 # Bloom Daily Ops
 
-Execute uma rotina sequencial, idempotente e limitada. Atue como orquestrador:
-delegue cada etapa à skill indicada e consolide o resultado. Uma falha em uma
-etapa não autoriza atalhos nas demais.
+Execute uma rotina sequencial, idempotente e limitada. Atue como orquestrador,
+aplicando diretamente os contratos das skills especialistas e consolidando o
+resultado. Uma falha em uma etapa não autoriza atalhos nas demais. Não declare
+uma etapa concluída sem executar as ferramentas obrigatórias e citar os dados
+retornados por elas.
 
 ## Etapa 1 — revisão editorial (`bloom-reviewer`)
 
-1. Execute integralmente o fluxo da skill `bloom-reviewer`.
-2. Consulte os dois tenants e revise no máximo um draft por tenant.
-3. Envie apenas parecer estruturado. Não edite, aprove, rejeite, arquive nem
+1. Aplique integralmente o contrato da skill `bloom-reviewer`.
+2. Chame `bloom_editorial_review_backlog` uma vez para `viralbarato` e uma vez
+   para `mundonoprato`, sempre com `limit=1`.
+3. Revise no máximo um draft por tenant e chame
+   `bloom_submit_editorial_review` para cada parecer concluído.
+4. Envie apenas parecer estruturado. Não edite, aprove, rejeite, arquive nem
    publique.
-4. Registre backlog vazio como resultado normal.
+5. Registre backlog vazio como resultado normal, mencionando explicitamente o
+   tenant consultado.
 
 ## Etapa 2 — auditoria de desempenho (`bloom-operations`)
 
@@ -35,6 +41,9 @@ etapa não autoriza atalhos nas demais.
 - Na primeira falha técnica repetida, encerre a etapa afetada e marque-a como
   `needs_operator`, continuando apenas etapas independentes.
 - Nunca exponha tokens, cookies, prompts internos ou respostas privadas.
+- Se qualquer ferramenta obrigatória não estiver disponível ou não tiver sido
+  chamada, não use “concluído”: marque a etapa como `needs_operator` e informe
+  exatamente qual chamada faltou.
 
 ## Saída consolidada
 
@@ -47,3 +56,5 @@ Produza os blocos:
 5. `ESTADO`: `ok`, `attention` ou `needs_operator`.
 
 Declare explicitamente que publicação e decisão final permanecem humanas.
+Uma resposta genérica sem IDs/estado de backlog e sem os números retornados por
+`bloom_performance_metrics` é inválida.
