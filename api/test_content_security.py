@@ -30,6 +30,8 @@ from main import (
     agent_review_input_hash,
     AgentEditorialReviewCreate,
     PageViewCreate,
+    TrafficRecoveryAttemptCreate,
+    build_traffic_recovery_candidates,
 )
 
 
@@ -222,6 +224,75 @@ class PerformanceAlertTests(unittest.TestCase):
             datetime(2026, 8, 4, tzinfo=timezone.utc),
         )
         self.assertNotIn("missing_affiliate", {item["code"] for item in alerts})
+
+
+class TrafficRecoveryPolicyTests(unittest.TestCase):
+    def post(self, **overrides):
+        values = {
+            "post_id": 58,
+            "tenant_slug": "viralbarato",
+            "title": "Artigo sem trÃ¡fego",
+            "published_at": datetime(2026, 8, 1, tzinfo=timezone.utc),
+            "views": 0,
+            "clicks": 0,
+            "has_affiliate_link": True,
+        }
+        values.update(overrides)
+        return values
+
+    def test_limits_daily_work_and_prioritizes_commercial_candidates(self):
+        posts = [
+            self.post(post_id=1, tenant_slug="mundonoprato"),
+            self.post(post_id=2, has_affiliate_link=False),
+            self.post(post_id=3),
+            self.post(post_id=4),
+        ]
+        candidates = build_traffic_recovery_candidates(
+            posts, [], now=datetime(2026, 8, 11, tzinfo=timezone.utc), limit=2
+        )
+        self.assertEqual([item["post_id"] for item in candidates], [3, 4])
+        self.assertEqual(candidates[0]["recommended_action"], "diagnose_indexing")
+
+    def test_waits_seven_days_after_a_completed_attempt(self):
+        histories = [{
+            "post_id": 58,
+            "status": "completed",
+            "created_at": datetime(2026, 8, 8, tzinfo=timezone.utc),
+        }]
+        candidates = build_traffic_recovery_candidates(
+            [self.post()], histories, now=datetime(2026, 8, 11, tzinfo=timezone.utc)
+        )
+        self.assertEqual(candidates, [])
+
+    def test_escalates_after_two_unsuccessful_cycles(self):
+        histories = [
+            {"post_id": 58, "status": "ineffective", "created_at": datetime(2026, 7, 20, tzinfo=timezone.utc)},
+            {"post_id": 58, "status": "ineffective", "created_at": datetime(2026, 7, 30, tzinfo=timezone.utc)},
+        ]
+        candidates = build_traffic_recovery_candidates(
+            [self.post()], histories, now=datetime(2026, 8, 11, tzinfo=timezone.utc)
+        )
+        self.assertEqual(candidates[0]["recommended_action"], "human_exception")
+        self.assertFalse(candidates[0]["autonomous"])
+
+    def test_rejects_unsafe_agent_action(self):
+        with self.assertRaises(Exception):
+            TrafficRecoveryAttemptCreate(
+                post_id=58,
+                diagnosis="low_demand",
+                action="rewrite_published_post",
+                rationale="Alterar todo o artigo automaticamente.",
+            )
+
+    def test_accepts_auditable_low_risk_action(self):
+        attempt = TrafficRecoveryAttemptCreate(
+            post_id=58,
+            diagnosis="indexing_unknown",
+            action="request_indexing",
+            rationale="A pÃ¡gina nÃ£o possui observaÃ§Ã£o de indexaÃ§Ã£o recente.",
+            evidence=[{"source": "search_console", "status": "not_indexed"}],
+        )
+        self.assertEqual(attempt.action, "request_indexing")
 
 
 class ContentTokenTests(unittest.TestCase):
