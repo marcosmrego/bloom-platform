@@ -15,7 +15,7 @@ import unicodedata
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import parse_qs, urlencode, urlparse
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import psycopg2
@@ -268,6 +268,70 @@ def build_performance_alerts(
                 add(post, "offer_expiring", "medium", "Oferta vence em até 3 dias", "Revalidar preço, cupom e disponibilidade antes do vencimento.")
 
     return sorted(alerts, key=lambda item: (priority_order[item["priority"]], item["post_id"], item["code"]))
+
+
+TRAFFIC_RECOVERY_COOLDOWN_DAYS = 7
+TRAFFIC_RECOVERY_MAX_AUTONOMOUS_CYCLES = 2
+
+
+def build_traffic_recovery_candidates(
+    posts: List[Dict[str, Any]],
+    histories: List[Dict[str, Any]],
+    now: Optional[datetime] = None,
+    limit: int = 5,
+) -> List[Dict[str, Any]]:
+    """Select bounded recovery work while preventing repeated agent loops."""
+    current = now or datetime.now(timezone.utc)
+    history_by_post: Dict[int, List[Dict[str, Any]]] = {}
+    for attempt in histories:
+        history_by_post.setdefault(int(attempt["post_id"]), []).append(attempt)
+
+    candidates = []
+    for post in posts:
+        published_at = post.get("published_at")
+        observable_since = max(
+            published_at or ANALYTICS_COLLECTION_STARTED,
+            ANALYTICS_COLLECTION_STARTED,
+        )
+        if (current - observable_since).days < 3 or int(post.get("views") or 0) > 0:
+            continue
+
+        attempts = sorted(
+            history_by_post.get(int(post["post_id"]), []),
+            key=lambda item: item.get("created_at") or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        if attempts:
+            latest_at = attempts[0].get("created_at")
+            if latest_at and current - latest_at < timedelta(days=TRAFFIC_RECOVERY_COOLDOWN_DAYS):
+                continue
+        # If the article is still in the zero-traffic queue after the cooldown,
+        # a previously completed intervention did not achieve its objective.
+        ineffective_cycles = sum(
+            1 for item in attempts if item.get("status") in {"completed", "ineffective"}
+        )
+        autonomous = ineffective_cycles < TRAFFIC_RECOVERY_MAX_AUTONOMOUS_CYCLES
+        recommended_action = "diagnose_indexing" if autonomous else "human_exception"
+        commercial_score = 2 if post.get("tenant_slug") == "viralbarato" and post.get("has_affiliate_link") else 0
+        candidates.append({
+            "post_id": post["post_id"],
+            "tenant_slug": post["tenant_slug"],
+            "title": post["title"],
+            "published_at": published_at,
+            "views": int(post.get("views") or 0),
+            "clicks": int(post.get("clicks") or 0),
+            "attempt_count": len(attempts),
+            "ineffective_cycles": ineffective_cycles,
+            "recommended_action": recommended_action,
+            "autonomous": autonomous,
+            "measurement_window_days": TRAFFIC_RECOVERY_COOLDOWN_DAYS,
+            "_priority": (-commercial_score, post["post_id"]),
+        })
+
+    selected = sorted(candidates, key=lambda item: item["_priority"])[:max(0, min(limit, 20))]
+    for item in selected:
+        item.pop("_priority", None)
+    return selected
 
 
 def post_request_hash(data: "PostCreate") -> str:
@@ -669,6 +733,21 @@ class AgentEditorialReviewCreate(BaseModel):
     summary: str = Field(min_length=20, max_length=2000)
     checks: List[AgentEditorialCheck] = Field(min_length=1, max_length=30)
     suggested_edits: List[str] = Field(default_factory=list, max_length=20)
+
+
+class TrafficRecoveryAttemptCreate(BaseModel):
+    post_id: int = Field(gt=0)
+    diagnosis: Literal[
+        "indexing_unknown", "not_indexed", "low_impressions", "low_ctr",
+        "missing_internal_links", "distribution_gap", "low_demand",
+    ]
+    action: Literal[
+        "request_indexing", "generate_social_package", "propose_internal_links",
+        "propose_metadata", "monitor", "escalate_human",
+    ]
+    rationale: str = Field(min_length=20, max_length=2000)
+    evidence: List[Dict[str, Any]] = Field(default_factory=list, max_length=20)
+    status: Literal["completed", "blocked", "ineffective"] = "completed"
 
 
 class TopicSimilarityCheck(BaseModel):
@@ -1475,6 +1554,148 @@ async def get_editorial_metrics(
             conn.close()
 
     return await run_db_task(_sync, tenant_slug, days)
+
+
+@app.get("/api/v1/editorial/traffic-recovery/backlog")
+async def get_traffic_recovery_backlog(
+    limit: int = 5,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_content_token(authorization)
+    if limit < 1 or limit > 20:
+        raise HTTPException(status_code=422, detail="Limit must be between 1 and 20")
+
+    def _sync(candidate_limit: int):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT p.id AS post_id, t.slug AS tenant_slug, p.title,
+                       p.published_at,
+                       EXISTS (
+                           SELECT 1 FROM post_commerce pc
+                           WHERE pc.post_id = p.id AND pc.tenant_id = p.tenant_id
+                             AND pc.status = 'active'
+                       ) OR pr.affiliate_url IS NOT NULL AS has_affiliate_link,
+                       COUNT(DISTINCT pv.id) AS views,
+                       COUNT(DISTINCT c.id) AS clicks
+                FROM posts p
+                JOIN tenants t ON t.id = p.tenant_id
+                LEFT JOIN products pr ON pr.id = p.product_id AND pr.tenant_id = p.tenant_id
+                LEFT JOIN page_views pv ON pv.post_id = p.id AND pv.tenant_id = p.tenant_id
+                    AND pv.created_at >= NOW() - INTERVAL '7 days'
+                LEFT JOIN clicks c ON c.post_id = p.id AND c.tenant_id = p.tenant_id
+                    AND c.created_at >= NOW() - INTERVAL '7 days'
+                WHERE p.status = 'published'
+                GROUP BY p.id, t.slug, p.title, p.published_at, p.tenant_id, pr.affiliate_url
+                """
+            )
+            posts = [dict(row) for row in cur.fetchall()]
+            cur.execute(
+                """
+                SELECT post_id, status, created_at
+                FROM traffic_recovery_attempts
+                ORDER BY created_at DESC
+                """
+            )
+            histories = [dict(row) for row in cur.fetchall()]
+            items = build_traffic_recovery_candidates(posts, histories, limit=candidate_limit)
+            return {
+                "items": items,
+                "limit": candidate_limit,
+                "policy": {
+                    "cooldown_days": TRAFFIC_RECOVERY_COOLDOWN_DAYS,
+                    "max_autonomous_cycles": TRAFFIC_RECOVERY_MAX_AUTONOMOUS_CYCLES,
+                    "published_content_mutation": False,
+                },
+            }
+        finally:
+            conn.close()
+
+    return await run_db_task(_sync, limit)
+
+
+@app.post("/api/v1/{tenant_slug}/editorial/traffic-recovery/attempts")
+async def submit_traffic_recovery_attempt(
+    tenant_slug: str,
+    data: TrafficRecoveryAttemptCreate,
+    authorization: Optional[str] = Header(default=None),
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+):
+    require_content_token(authorization)
+    key = validate_idempotency_key(idempotency_key)
+
+    def _sync(tslug: str, payload: TrafficRecoveryAttemptCreate, request_key: str):
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT p.id, p.tenant_id
+                FROM posts p JOIN tenants t ON t.id = p.tenant_id
+                WHERE p.id = %s AND t.slug = %s AND p.status = 'published'
+                """,
+                (payload.post_id, tslug),
+            )
+            post = cur.fetchone()
+            if not post:
+                raise HTTPException(status_code=404, detail="Published post not found")
+            cur.execute(
+                """
+                INSERT INTO traffic_recovery_attempts
+                    (tenant_id, post_id, diagnosis, action, rationale, evidence,
+                     status, idempotency_key, agent_name)
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, 'hermes-bloom')
+                ON CONFLICT (idempotency_key) DO NOTHING
+                RETURNING id, created_at
+                """,
+                (
+                    post["tenant_id"], payload.post_id, payload.diagnosis,
+                    payload.action, payload.rationale,
+                    json.dumps(payload.evidence, ensure_ascii=False), payload.status,
+                    request_key,
+                ),
+            )
+            created = cur.fetchone()
+            if not created:
+                cur.execute(
+                    """
+                    SELECT id, post_id, action, status, created_at
+                    FROM traffic_recovery_attempts WHERE idempotency_key = %s
+                    """,
+                    (request_key,),
+                )
+                created = cur.fetchone()
+                if created["post_id"] != payload.post_id or created["action"] != payload.action:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Idempotency key already belongs to another recovery action",
+                    )
+                result_status = "already_recorded"
+            else:
+                result_status = "recorded"
+            created = dict(created)
+            conn.commit()
+            return {
+                "status": result_status,
+                "attempt_id": created["id"],
+                "post_id": created.get("post_id", payload.post_id),
+                "action": created.get("action", payload.action),
+                "outcome": created.get("status", payload.status),
+                "created_at": created["created_at"],
+            }
+        except HTTPException:
+            conn.rollback()
+            raise
+        except Exception:
+            conn.rollback()
+            logging.exception("Traffic recovery attempt submission failed")
+            raise HTTPException(status_code=500, detail="Traffic recovery attempt submission failed")
+        finally:
+            conn.close()
+
+    return await run_db_task(_sync, tenant_slug, data, key)
 
 
 @app.post("/api/v1/editorial/review/revenue/import")

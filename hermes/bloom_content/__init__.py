@@ -266,6 +266,44 @@ def _handle_performance_metrics(args: dict, **_kwargs) -> str:
         return tool_error(f"Bloom performance metrics failed: {exc}")
 
 
+def _handle_traffic_recovery_backlog(args: dict, **_kwargs) -> str:
+    try:
+        limit = int(args.get("limit") or 5)
+        if limit < 1 or limit > 20:
+            raise ValueError("limit must be between 1 and 20")
+        base_url, _token = _config()
+        response = requests.get(
+            f"{base_url}/api/v1/editorial/traffic-recovery/backlog",
+            headers=_headers(), params={"limit": limit}, timeout=TIMEOUT,
+        )
+        payload = _json_response(response)
+        payload["success"] = True
+        return tool_result(payload)
+    except Exception as exc:
+        return tool_error(f"Bloom traffic recovery backlog failed: {exc}")
+
+
+def _handle_submit_traffic_recovery(args: dict, **_kwargs) -> str:
+    try:
+        tenant = _tenant(args.get("tenant"))
+        key = str(args.get("idempotency_key") or "").strip()
+        if len(key) < 8:
+            raise ValueError("idempotency_key is required")
+        attempt = dict(args.get("attempt") or {})
+        base_url, _token = _config()
+        headers = _headers()
+        headers["Idempotency-Key"] = key
+        response = requests.post(
+            f"{base_url}/api/v1/{tenant}/editorial/traffic-recovery/attempts",
+            headers=headers, json=attempt, timeout=TIMEOUT,
+        )
+        payload = _json_response(response)
+        payload["success"] = True
+        return tool_result(payload)
+    except Exception as exc:
+        return tool_error(f"Bloom traffic recovery submission failed: {exc}")
+
+
 def _handle_submit_editorial_review(args: dict, **_kwargs) -> str:
     try:
         tenant = _tenant(args.get("tenant"))
@@ -483,6 +521,42 @@ BLOOM_PERFORMANCE_METRICS_SCHEMA = {
 }
 
 
+BLOOM_TRAFFIC_RECOVERY_BACKLOG_SCHEMA = {
+    "name": "bloom_traffic_recovery_backlog",
+    "description": "List a bounded, cooldown-aware queue of published posts eligible for traffic recovery.",
+    "parameters": {
+        "type": "object",
+        "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 20}},
+    },
+}
+
+
+BLOOM_SUBMIT_TRAFFIC_RECOVERY_SCHEMA = {
+    "name": "bloom_submit_traffic_recovery",
+    "description": "Record one evidenced low-risk recovery action. It cannot edit or unpublish content.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tenant": {"type": "string", "enum": sorted(ALLOWED_TENANTS)},
+            "idempotency_key": {"type": "string", "minLength": 8, "maxLength": 128},
+            "attempt": {
+                "type": "object",
+                "properties": {
+                    "post_id": {"type": "integer", "minimum": 1},
+                    "diagnosis": {"type": "string", "enum": ["indexing_unknown", "not_indexed", "low_impressions", "low_ctr", "missing_internal_links", "distribution_gap", "low_demand"]},
+                    "action": {"type": "string", "enum": ["request_indexing", "generate_social_package", "propose_internal_links", "propose_metadata", "monitor", "escalate_human"]},
+                    "rationale": {"type": "string", "minLength": 20, "maxLength": 2000},
+                    "evidence": {"type": "array", "maxItems": 20, "items": {"type": "object"}},
+                    "status": {"type": "string", "enum": ["completed", "blocked", "ineffective"]},
+                },
+                "required": ["post_id", "diagnosis", "action", "rationale", "evidence", "status"],
+            },
+        },
+        "required": ["tenant", "idempotency_key", "attempt"],
+    },
+}
+
+
 BLOOM_SUBMIT_EDITORIAL_REVIEW_SCHEMA = {
     "name": "bloom_submit_editorial_review",
     "description": "Submit a structured first-pass review for a Bloom draft. It cannot edit, approve, reject or publish.",
@@ -606,6 +680,8 @@ def register(ctx) -> None:
         ("bloom_propose_monetization", BLOOM_PROPOSE_MONETIZATION_SCHEMA, _handle_propose_monetization),
         ("bloom_editorial_review_backlog", BLOOM_EDITORIAL_REVIEW_BACKLOG_SCHEMA, _handle_editorial_review_backlog),
         ("bloom_performance_metrics", BLOOM_PERFORMANCE_METRICS_SCHEMA, _handle_performance_metrics),
+        ("bloom_traffic_recovery_backlog", BLOOM_TRAFFIC_RECOVERY_BACKLOG_SCHEMA, _handle_traffic_recovery_backlog),
+        ("bloom_submit_traffic_recovery", BLOOM_SUBMIT_TRAFFIC_RECOVERY_SCHEMA, _handle_submit_traffic_recovery),
         ("bloom_submit_editorial_review", BLOOM_SUBMIT_EDITORIAL_REVIEW_SCHEMA, _handle_submit_editorial_review),
         ("bloom_upload_media", BLOOM_UPLOAD_MEDIA_SCHEMA, _handle_upload_media),
         ("bloom_create_draft", BLOOM_CREATE_DRAFT_SCHEMA, _handle_create_draft),

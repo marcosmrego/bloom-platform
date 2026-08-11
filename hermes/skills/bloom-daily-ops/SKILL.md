@@ -38,6 +38,15 @@ retornados por elas.
 5. Não estime custos do Hermes a partir dessas métricas e não altere conteúdo,
    monetização, configuração ou agenda.
 
+## Etapa 3 — recuperação limitada de tráfego (`bloom-traffic-recovery`)
+
+1. Aplique integralmente o contrato da skill `bloom-traffic-recovery`.
+2. Processe no máximo cinco candidatos retornados pela fila controlada.
+3. A etapa pode diagnosticar, registrar propostas e produzir pacotes sociais,
+   mas não pode editar artigos publicados nem publicar em redes sociais.
+4. Falta de acesso ao Search Console deve produzir tentativa `blocked`, nunca
+   uma afirmação inventada sobre indexação.
+
 ## Controles de execução
 
 - Não crie drafts nesta rotina.
@@ -58,7 +67,8 @@ Produza os blocos:
 2. `DESEMPENHO 7D`: visitas, cliques, CTR e estado financeiro;
 3. `ALERTAS`: contagem por prioridade, posts e ação recomendada;
 4. `PENDÊNCIAS HUMANAS`: decisões editoriais e verificações necessárias;
-5. `ESTADO`: `ok`, `attention` ou `needs_operator`.
+5. `RECUPERAÇÃO`: tentativas realizadas, bloqueios e próxima medição;
+6. `ESTADO`: `ok`, `attention` ou `needs_operator`.
 
 Declare explicitamente que publicação e decisão final permanecem humanas.
 Uma resposta genérica sem IDs/estado de backlog e sem os números retornados por

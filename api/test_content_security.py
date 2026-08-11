@@ -266,8 +266,8 @@ class TrafficRecoveryPolicyTests(unittest.TestCase):
 
     def test_escalates_after_two_unsuccessful_cycles(self):
         histories = [
-            {"post_id": 58, "status": "ineffective", "created_at": datetime(2026, 7, 20, tzinfo=timezone.utc)},
-            {"post_id": 58, "status": "ineffective", "created_at": datetime(2026, 7, 30, tzinfo=timezone.utc)},
+            {"post_id": 58, "status": "completed", "created_at": datetime(2026, 7, 20, tzinfo=timezone.utc)},
+            {"post_id": 58, "status": "completed", "created_at": datetime(2026, 7, 30, tzinfo=timezone.utc)},
         ]
         candidates = build_traffic_recovery_candidates(
             [self.post()], histories, now=datetime(2026, 8, 11, tzinfo=timezone.utc)
