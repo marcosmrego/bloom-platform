@@ -69,3 +69,11 @@ Snapshot validado pelo operador contra repositório e produção em 05/08/2026.
   legenda, manifesto de origem e faixa AAC silenciosa. A execução piloto gerou
   e validou o pacote de 10/08/2026 a partir do post 58; a publicação no TikTok
   permanece manual.
+- Em 11/08/2026, entrou em produção a recuperação limitada de tráfego no
+  commit `0d74765`. A fila prioriza no máximo cinco artigos por execução,
+  aplica cooldown de sete dias e interrompe autonomia depois de dois ciclos
+  sem resultado. O Hermes pode registrar diagnósticos, solicitar indexação
+  somente quando houver ferramenta e evidência, gerar pacote social ou propor
+  metadata e links internos. Ele continua sem permissão para editar artigos
+  publicados ou publicar em redes sociais. O smoke test retornou a política
+  ativa e dois candidatos sem criar tentativas.
