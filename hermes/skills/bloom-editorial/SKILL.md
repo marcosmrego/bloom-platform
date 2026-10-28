@@ -48,7 +48,8 @@ Crie no máximo um draft editorial por execução para o tenant solicitado.
 - Comparações de sódio, minerais ou benefícios à saúde possuem fonte
   oficial/primária e não transformam pequenas diferenças em vantagem clínica.
 - Imagem é WebP exclusiva e foi persistida pelo Bloom.
-- ASIN, quando presente, foi validado no destino real.
+- ASIN, quando presente, foi validado no destino real. Produtos do Mercado
+  Livre seguem a skill `bloom-product-post`, não esta.
 - Nenhum preço é apresentado como estável.
 
 ## Saída

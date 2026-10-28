@@ -327,6 +327,33 @@ def _handle_submit_editorial_review(args: dict, **_kwargs) -> str:
         return tool_error(f"Bloom editorial review submission failed: {exc}")
 
 
+def _handle_register_product(args: dict, **_kwargs) -> str:
+    try:
+        tenant = _tenant(args.get("tenant"))
+        if tenant != "viralbarato":
+            raise ValueError("Mercado Livre products are enabled only for viralbarato")
+        name = str(args.get("name") or "").strip()
+        if not 3 <= len(name) <= 200:
+            raise ValueError("name must contain 3-200 characters")
+        affiliate_link = str(args.get("affiliate_link") or "").strip()
+        if urlparse(affiliate_link).scheme != "https":
+            raise ValueError("affiliate_link must be an HTTPS URL")
+        body: dict[str, Any] = {"name": name, "affiliate_link": affiliate_link}
+        item_id = str(args.get("item_id") or "").strip()
+        if item_id:
+            body["item_id"] = item_id
+        base_url, _token = _config()
+        response = requests.post(
+            f"{base_url}/api/v1/{tenant}/editorial/products/mercadolivre",
+            headers=_headers(), json=body, timeout=TIMEOUT,
+        )
+        payload = _json_response(response)
+        payload["success"] = True
+        return tool_result(payload)
+    except Exception as exc:
+        return tool_error(f"Bloom product registration failed: {exc}")
+
+
 def _handle_create_draft(args: dict, **_kwargs) -> str:
     try:
         tenant = _tenant(args.get("tenant"))
@@ -600,6 +627,29 @@ BLOOM_SUBMIT_EDITORIAL_REVIEW_SCHEMA = {
 }
 
 
+BLOOM_REGISTER_PRODUCT_SCHEMA = {
+    "name": "bloom_register_product",
+    "description": (
+        "Register a Mercado Livre affiliate product for ViralBarato from its name and "
+        "affiliate link. Bloom verifies the item behind the link and returns the "
+        "external_id to use as post.product_external_id. It never publishes."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tenant": {"type": "string", "enum": ["viralbarato"]},
+            "name": {"type": "string", "minLength": 3, "maxLength": 200},
+            "affiliate_link": {"type": "string", "format": "uri"},
+            "item_id": {
+                "type": "string",
+                "description": "Optional MLB item id, only when the link does not reveal the item.",
+            },
+        },
+        "required": ["tenant", "name", "affiliate_link"],
+    },
+}
+
+
 BLOOM_CREATE_DRAFT_SCHEMA = {
     "name": "bloom_create_draft",
     "description": "Create an idempotent Bloom draft. This tool can never publish.",
@@ -618,6 +668,7 @@ BLOOM_CREATE_DRAFT_SCHEMA = {
                     "image_url": {"type": "string"},
                     "category_slug": {"type": "string"},
                     "product_asin": {"type": "string"},
+                    "product_external_id": {"type": "string"},
                     "rating": {"type": "number", "minimum": 0, "maximum": 5},
                     "pros": {"type": "array", "items": {"type": "string"}},
                     "cons": {"type": "array", "items": {"type": "string"}},
@@ -683,6 +734,7 @@ def register(ctx) -> None:
         ("bloom_traffic_recovery_backlog", BLOOM_TRAFFIC_RECOVERY_BACKLOG_SCHEMA, _handle_traffic_recovery_backlog),
         ("bloom_submit_traffic_recovery", BLOOM_SUBMIT_TRAFFIC_RECOVERY_SCHEMA, _handle_submit_traffic_recovery),
         ("bloom_submit_editorial_review", BLOOM_SUBMIT_EDITORIAL_REVIEW_SCHEMA, _handle_submit_editorial_review),
+        ("bloom_register_product", BLOOM_REGISTER_PRODUCT_SCHEMA, _handle_register_product),
         ("bloom_upload_media", BLOOM_UPLOAD_MEDIA_SCHEMA, _handle_upload_media),
         ("bloom_create_draft", BLOOM_CREATE_DRAFT_SCHEMA, _handle_create_draft),
     ):

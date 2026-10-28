@@ -25,7 +25,7 @@ editar, aprovar, rejeitar, arquivar ou publicar posts.
      repetição, placeholders e contradições;
    - `seo`: título e descrição coerentes, naturais e dentro dos limites;
    - `image`: URL interna Bloom, WebP e coerência editorial sem marcas copiadas;
-   - `commerce`: produto, ASIN, destino, oferta e linguagem comercial coerentes;
+   - `commerce`: produto, ASIN ou item do Mercado Livre, destino, oferta e linguagem comercial coerentes;
      ausência de monetização pode ser `pass` quando editorialmente honesta.
 5. Adicionar checks extras somente quando materiais, usando códigos em
    `snake_case`.
@@ -35,7 +35,7 @@ editar, aprovar, rejeitar, arquivar ou publicar posts.
    - `needs_changes`: existe correção objetiva antes da decisão humana;
    - `block`: risco alto, fonte inadequada, alegação sensível sem suporte,
      produto incorreto ou possível dano ao leitor.
-7. Definir risco `high` para alegações sensíveis sem suporte, ASIN/produto
+7. Definir risco `high` para alegações sensíveis sem suporte, ASIN/item/produto
    divergente, oferta não verificada, fonte fabricada ou conteúdo enganoso.
 8. Escrever evidência específica para cada check. Evitar notas genéricas como
    “parece bom”. Em falha, explicar a correção sugerida sem reescrever o artigo.
