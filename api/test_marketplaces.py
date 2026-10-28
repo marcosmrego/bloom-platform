@@ -3,6 +3,7 @@ import unittest
 from fastapi import HTTPException
 
 from marketplaces import (
+    classify_commerce_url,
     normalize_mercadolivre_id,
     validate_mercadolivre_destination,
 )
@@ -74,6 +75,30 @@ class MercadoLivreDestinationTests(unittest.TestCase):
         self.assertIsNone(validate_mercadolivre_destination("no_match", None, None))
         with self.assertRaises(HTTPException):
             validate_mercadolivre_destination("no_match", SHORT_LINK, None)
+
+
+class ClassifyCommerceUrlTests(unittest.TestCase):
+    TAG = "marcosmrego-20"
+
+    def test_classifies_tagged_amazon_and_mercadolivre_urls(self):
+        amazon = "https://www.amazon.com.br/dp/B0ABCDE123?tag=marcosmrego-20"
+        self.assertEqual(classify_commerce_url(amazon, self.TAG), "amazon")
+        self.assertEqual(classify_commerce_url(SHORT_LINK, self.TAG), "mercadolivre")
+        self.assertEqual(classify_commerce_url(LISTING_URL, self.TAG), "mercadolivre")
+
+    def test_rejects_untrusted_or_untagged_urls(self):
+        invalid = (
+            "https://www.amazon.com.br/dp/B0ABCDE123?tag=outra-20",
+            "https://www.amazon.com.br/dp/B0ABCDE123",
+            "http://meli.la/2AbCdEf",
+            "https://evil.test/dp/B0ABCDE123?tag=marcosmrego-20",
+            "https://mercadolivre.com.br@evil.test/MLB-3456789012",
+            "",
+        )
+        for url in invalid:
+            with self.subTest(url=url):
+                with self.assertRaises(HTTPException):
+                    classify_commerce_url(url, self.TAG)
 
 
 if __name__ == "__main__":

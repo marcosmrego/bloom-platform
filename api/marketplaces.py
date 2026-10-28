@@ -2,7 +2,7 @@
 
 import re
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from fastapi import HTTPException
 
@@ -56,3 +56,26 @@ def validate_mercadolivre_destination(
         if not path_ids or path_ids[0] != item_id:
             raise HTTPException(status_code=422, detail="Destination URL does not match the item id")
     return url
+
+
+AMAZON_HOSTS = frozenset({"amazon.com.br", "www.amazon.com.br"})
+
+
+def classify_commerce_url(url: Optional[str], amazon_tag: str) -> str:
+    """Return the marketplace ('amazon' or 'mercadolivre') of a trusted commerce URL."""
+    candidate = (url or "").strip()
+    parsed = urlparse(candidate)
+    if parsed.scheme != "https" or parsed.username is not None or parsed.port is not None:
+        raise HTTPException(status_code=422, detail="Commerce URL must be a plain HTTPS URL")
+    if parsed.hostname in AMAZON_HOSTS:
+        if parse_qs(parsed.query).get("tag") != [amazon_tag]:
+            raise HTTPException(
+                status_code=422, detail="Commerce URL must contain the configured affiliate tag"
+            )
+        return "amazon"
+    if is_mercadolivre_host(parsed.hostname):
+        return "mercadolivre"
+    raise HTTPException(
+        status_code=422,
+        detail="Commerce URL must be an amazon.com.br or Mercado Livre HTTPS URL",
+    )
