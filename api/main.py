@@ -16,6 +16,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import parse_qs, urlencode, urlparse
 from datetime import date, datetime, timedelta, timezone
+from dataclasses import dataclass
 from decimal import Decimal
 
 import psycopg2
@@ -28,6 +29,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from PIL import Image, UnidentifiedImageError
 from typing import Optional, List, Dict, Any, Literal
+
+import httpx
+from marketplace_store import PostgresTokenStore, upsert_mercadolivre_product
+from mercadolivre_client import MercadoLivreCredentials, MercadoLivreTokenManager
+from product_registration import register_mercadolivre_product
 
 # ── Config ────────────────────────────────────────
 def get_db_password():
@@ -2434,6 +2440,74 @@ async def create_affiliate_search_destination(
     if tenant_slug != "viralbarato":
         raise HTTPException(status_code=422, detail="Affiliate search is enabled only for ViralBarato")
     return build_affiliate_search_destination(data.query)
+
+
+class MercadoLivreProductRegister(BaseModel):
+    name: str = Field(min_length=3, max_length=200)
+    affiliate_link: str = Field(min_length=10, max_length=1000)
+    item_id: Optional[str] = Field(default=None, max_length=20)
+
+
+@dataclass(frozen=True)
+class MercadoLivreRuntime:
+    client: Optional[httpx.AsyncClient]
+    tokens: Optional[MercadoLivreTokenManager]
+
+
+mercadolivre_runtime: Optional[MercadoLivreRuntime] = None
+
+
+def get_mercadolivre_runtime() -> MercadoLivreRuntime:
+    """Build the shared Mercado Livre client once; 503 when credentials are missing."""
+    global mercadolivre_runtime
+    if mercadolivre_runtime is None:
+        client_id = os.getenv("MERCADO_LIVRE_CLIENT_ID", "").strip()
+        client_secret = os.getenv("MERCADO_LIVRE_CLIENT_SECRET", "").strip()
+        if not client_id or not client_secret:
+            raise HTTPException(status_code=503, detail="Mercado Livre integration is not configured")
+        client = httpx.AsyncClient(timeout=15.0)
+        credentials = MercadoLivreCredentials(
+            client_id, client_secret, os.getenv("MERCADO_LIVRE_REDIRECT_URI", "").strip()
+        )
+        mercadolivre_runtime = MercadoLivreRuntime(
+            client,
+            MercadoLivreTokenManager(
+                credentials,
+                PostgresTokenStore(get_db, run_db_task),
+                client,
+                seed_tokens=(
+                    os.getenv("MERCADO_LIVRE_ACCESS_TOKEN", "").strip(),
+                    os.getenv("MERCADO_LIVRE_REFRESH_TOKEN", "").strip(),
+                ),
+            ),
+        )
+    return mercadolivre_runtime
+
+
+@app.post("/api/v1/{tenant_slug}/editorial/products/mercadolivre")
+async def register_mercadolivre_product_endpoint(
+    tenant_slug: str,
+    data: MercadoLivreProductRegister,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_content_token(authorization)
+    if tenant_slug != "viralbarato":
+        raise HTTPException(status_code=422, detail="Mercado Livre products are enabled only for ViralBarato")
+    runtime = get_mercadolivre_runtime()
+    product = await register_mercadolivre_product(
+        data.name, data.affiliate_link, runtime.client, runtime.tokens, data.item_id
+    )
+    saved = await run_db_task(upsert_mercadolivre_product, get_db, tenant_slug, product)
+    if not saved:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return {
+        "product_id": saved["id"],
+        "external_id": saved["external_id"],
+        "title": product.title,
+        "price": str(product.price) if product.price is not None else None,
+        "image_url": product.image_url,
+        "permalink": product.permalink,
+    }
 
 
 @app.get("/api/v1/{tenant_slug}/editorial/monetization/backlog")
