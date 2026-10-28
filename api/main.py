@@ -26,13 +26,14 @@ from fastapi.staticfiles import StaticFiles
 import asyncio
 from functools import partial
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from PIL import Image, UnidentifiedImageError
 from typing import Optional, List, Dict, Any, Literal
 
 import httpx
 from marketplace_store import PostgresTokenStore, upsert_mercadolivre_product
 from mercadolivre_client import MercadoLivreCredentials, MercadoLivreTokenManager
+from marketplaces import classify_commerce_url, validate_mercadolivre_destination
 from product_registration import register_mercadolivre_product
 
 # ── Config ────────────────────────────────────────
@@ -769,6 +770,7 @@ class PostCreate(BaseModel):
     image_url: Optional[str] = None
     category_slug: Optional[str] = None
     product_asin: Optional[str] = None
+    product_external_id: Optional[str] = None
     rating: Optional[float] = None
     pros: Optional[List[str]] = None
     cons: Optional[List[str]] = None
@@ -778,6 +780,19 @@ class PostCreate(BaseModel):
     sources: List[SourceEvidence] = Field(default_factory=list)
     status: str = "draft"
     created_by: str = "hermes"
+
+    @model_validator(mode="after")
+    def _check_product_reference(self):
+        if self.product_external_id is not None:
+            if self.product_asin:
+                raise ValueError("Use either product_asin or product_external_id, not both")
+            from marketplaces import normalize_mercadolivre_id
+
+            try:
+                self.product_external_id = normalize_mercadolivre_id(self.product_external_id)
+            except HTTPException as exc:
+                raise ValueError(exc.detail) from exc
+        return self
 
 
 class PostReviewUpdate(BaseModel):
@@ -1264,6 +1279,27 @@ async def create_post(
                     return {"error": "Product ASIN not found for tenant"}, 422
                 product_id = prod["id"]
 
+            ml_product = None
+            if d.product_external_id:
+                cur.execute(
+                    """
+                    SELECT id, affiliate_link FROM products
+                    WHERE tenant_id = %s AND marketplace = 'mercadolivre'
+                      AND external_id = %s AND active
+                    """,
+                    (tenant_id, d.product_external_id),
+                )
+                ml_product = cur.fetchone()
+                if not ml_product:
+                    return {"error": "Mercado Livre product not found for tenant"}, 422
+                try:
+                    validate_mercadolivre_destination(
+                        "product", ml_product["affiliate_link"], d.product_external_id
+                    )
+                except HTTPException as exc:
+                    return {"error": exc.detail}, 422
+                product_id = ml_product["id"]
+
             # Normaliza slugs fornecidos e resolve colisões dentro do tenant.
             try:
                 slug = unique_post_slug(cur, tenant_id, d.slug or d.title)
@@ -1294,6 +1330,16 @@ async def create_post(
                 d.status,
             ))
             post_id = cur.fetchone()["id"]
+            if ml_product:
+                cur.execute(
+                    """
+                    INSERT INTO post_commerce (
+                        tenant_id, post_id, link_type, product_id,
+                        destination_url, verified_at, status
+                    ) VALUES (%s, %s, 'product', %s, %s, NOW(), 'active')
+                    """,
+                    (tenant_id, post_id, ml_product["id"], ml_product["affiliate_link"]),
+                )
             cur.execute(
                 """
                 UPDATE content_jobs
@@ -2127,21 +2173,11 @@ async def update_review_post(
         "offer_valid_until",
     }
     commerce_changed = bool(commerce_fields.intersection(supplied))
+    commerce_marketplace = None
     if supplied.get("commerce_link_type"):
-        commerce_url = (supplied.get("commerce_url") or "").strip()
-        parsed_commerce_url = urlparse(commerce_url)
-        if parsed_commerce_url.scheme != "https" or parsed_commerce_url.hostname not in {
-            "amazon.com.br", "www.amazon.com.br"
-        }:
-            raise HTTPException(
-                status_code=422,
-                detail="Commerce URL must be an HTTPS amazon.com.br URL",
-            )
-        if "tag=marcosmrego-20" not in parsed_commerce_url.query:
-            raise HTTPException(
-                status_code=422,
-                detail="Commerce URL must contain the configured affiliate tag",
-            )
+        commerce_marketplace = classify_commerce_url(
+            supplied.get("commerce_url"), AMAZON_ASSOCIATE_TAG
+        )
         if supplied["commerce_link_type"] == "offer" and not (
             supplied.get("offer_text") or ""
         ).strip():
@@ -2153,9 +2189,11 @@ async def update_review_post(
                 comparable_until = comparable_until.replace(tzinfo=timezone.utc)
             if comparable_until <= datetime.now(timezone.utc):
                 raise HTTPException(status_code=422, detail="Offer validity must be in the future")
-        if supplied["commerce_link_type"] == "product" and not (
-            supplied.get("product_asin") or ""
-        ).strip():
+        if (
+            supplied["commerce_link_type"] == "product"
+            and commerce_marketplace == "amazon"
+            and not (supplied.get("product_asin") or "").strip()
+        ):
             raise HTTPException(status_code=422, detail="Product link requires an ASIN")
 
     scalar_columns = {
@@ -2245,7 +2283,15 @@ async def update_review_post(
                         )
                         commerce_product_id = cur.fetchone()["product_id"]
                     if link_type == "product" and not commerce_product_id:
-                        return {"error": "Product link requires an associated ASIN"}, 422
+                        return {"error": "Product link requires an associated product"}, 422
+                    if commerce_product_id:
+                        cur.execute(
+                            "SELECT marketplace FROM products WHERE id = %s AND tenant_id = %s",
+                            (commerce_product_id, tenant_id),
+                        )
+                        linked = cur.fetchone()
+                        if linked and linked["marketplace"] != commerce_marketplace:
+                            return {"error": "Commerce URL does not match the product marketplace"}, 422
                     cur.execute(
                         """
                         INSERT INTO post_commerce (

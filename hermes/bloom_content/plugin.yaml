@@ -1,5 +1,5 @@
 name: bloom-content
-version: 1.4.0
+version: 1.5.0
 description: "Restricted Bloom API client for drafts, media, reviews, performance metrics, and bounded traffic recovery."
 author: Expansao AI
 kind: extension
@@ -17,5 +17,6 @@ provides_tools:
   - bloom_traffic_recovery_backlog
   - bloom_submit_traffic_recovery
   - bloom_submit_editorial_review
+  - bloom_register_product
   - bloom_upload_media
   - bloom_create_draft

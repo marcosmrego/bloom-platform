@@ -27,7 +27,7 @@ const sites: Record<string, SiteConfig> = {
     heading: '🔥 ViralBarato',
     subtitle: 'Reviews honestas. Links diretos. Menor preço.',
     brandLogo: '/images/branding/viralbarato-logo.png',
-    footer: '© 2026 ViralBarato. Links de afiliado Amazon.',
+    footer: '© 2026 ViralBarato. Links de afiliado Amazon e Mercado Livre.',
     accent: '#e63946',
     contentLabel: 'review',
     contentLabelPlural: 'reviews',
