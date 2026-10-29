@@ -2602,6 +2602,17 @@ async def review_list_draft_requests(authorization: Optional[str] = Header(defau
     return {"items": await run_db_task(draft_requests.list_recent, get_db)}
 
 
+@app.get("/api/v1/{tenant_slug}/editorial/draft-requests/pending")
+async def pending_draft_requests(
+    tenant_slug: str,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_content_token(authorization)
+    if tenant_slug != draft_requests.TENANT:
+        raise HTTPException(status_code=422, detail="Draft requests are enabled only for ViralBarato")
+    return {"pending": await run_db_task(draft_requests.pending_count, get_db, tenant_slug)}
+
+
 @app.post("/api/v1/{tenant_slug}/editorial/draft-requests/claim")
 async def claim_draft_request(
     tenant_slug: str,

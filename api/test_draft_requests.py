@@ -114,6 +114,22 @@ class ClaimAndFinishTests(unittest.TestCase):
         self.assertTrue(conn.committed)
 
 
+class PendingCountTests(unittest.TestCase):
+    def test_counts_claimable_requests_without_changing_state(self):
+        count, conn = run(draft_requests.pending_count, [{"n": 2}], "viralbarato")
+        self.assertEqual(count, 2)
+        self.assertFalse(conn.committed)
+        self.assertTrue(conn.closed)
+        sql = conn.cur.sql[0]
+        self.assertTrue(sql.startswith("SELECT COUNT(*)"))
+        self.assertIn("'pending'", sql)
+        self.assertIn("claimed_at <", sql)
+
+    def test_empty_queue_is_zero(self):
+        count, _ = run(draft_requests.pending_count, [{"n": 0}], "viralbarato")
+        self.assertEqual(count, 0)
+
+
 class DraftRequestEndpointTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(main.app)
@@ -144,6 +160,20 @@ class DraftRequestEndpointTests(unittest.TestCase):
     def test_claim_requires_automation_token(self):
         url = "/api/v1/viralbarato/editorial/draft-requests/claim"
         self.assertEqual(self.client.post(url, headers=REVIEW).status_code, 401)
+
+    def test_pending_requires_automation_token(self):
+        url = "/api/v1/viralbarato/editorial/draft-requests/pending"
+        self.assertEqual(self.client.get(url).status_code, 401)
+        self.assertEqual(self.client.get(url, headers=REVIEW).status_code, 401)
+
+    def test_pending_only_for_viralbarato(self):
+        url = "/api/v1/outro/editorial/draft-requests/pending"
+        self.assertEqual(self.client.get(url, headers=AUTOMATION).status_code, 422)
+
+    def test_pending_returns_count(self):
+        with patch.object(main, "run_db_task", AsyncMock(return_value=3)):
+            response = self.client.get("/api/v1/viralbarato/editorial/draft-requests/pending", headers=AUTOMATION)
+        self.assertEqual(response.json(), {"pending": 3})
 
     def test_claim_returns_null_when_queue_is_empty(self):
         with patch.object(main, "run_db_task", AsyncMock(return_value=None)):
