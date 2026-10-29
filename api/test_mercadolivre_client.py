@@ -6,11 +6,14 @@ from decimal import Decimal
 import httpx
 
 from mercadolivre_client import (
+    StoredTokens,
     MarketplaceUnavailable,
     MercadoLivreCredentials,
     MercadoLivreItem,
     MercadoLivreTokenManager,
+    fetch_catalog_product,
     fetch_item,
+    fetch_listing,
     name_matches_title,
     parse_item,
     resolve_item_id,
@@ -167,6 +170,100 @@ class FetchItemTests(unittest.TestCase):
         client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(404)))
         with self.assertRaises(MarketplaceUnavailable):
             run(fetch_item(client, manager, "MLB3456789012"))
+
+
+CATALOG_PAYLOAD = {
+    "id": "MLB24447228",
+    "name": "Chaleira De Vidro 1200ml Com Infusor",
+    "status": "active",
+    "pictures": [{"url": "https://http2.mlstatic.com/D_1.jpg"}],
+}
+CATALOG_LISTINGS = {
+    "results": [
+        {"item_id": "MLB3714053599", "price": 38.98, "condition": "new", "category_id": "MLB107481"},
+        {"item_id": "MLB3999999999", "price": 45.5, "condition": "new", "category_id": "MLB107481"},
+        {"item_id": "MLB3888888888", "price": 12.0, "condition": "used", "category_id": "MLB107481"},
+    ]
+}
+
+
+def catalog_client(product=(200, CATALOG_PAYLOAD), listings=(200, CATALOG_LISTINGS), seen=None):
+    def handler(request):
+        if seen is not None:
+            seen.append((request.url.path, request.headers.get("authorization")))
+        if request.url.path == "/products/MLB24447228":
+            return httpx.Response(product[0], json=product[1])
+        if request.url.path == "/products/MLB24447228/items":
+            return httpx.Response(listings[0], json=listings[1])
+        return httpx.Response(404, json={})
+
+    store = MemoryTokenStore(StoredTokens("live", "r", NOW + timedelta(hours=1)))
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler)), token_manager(store, handler)
+
+
+class CatalogProductTests(unittest.TestCase):
+    def test_uses_cheapest_new_listing_and_catalog_data(self):
+        seen = []
+        client, tokens = catalog_client(seen=seen)
+        item = run(fetch_catalog_product(client, tokens, "MLB24447228"))
+        self.assertEqual(
+            item,
+            MercadoLivreItem(
+                external_id="MLB24447228",
+                title="Chaleira De Vidro 1200ml Com Infusor",
+                price=Decimal("38.98"),
+                permalink="https://www.mercadolivre.com.br/p/MLB24447228",
+                image_url="https://http2.mlstatic.com/D_1.jpg",
+                available=True,
+                category_id="MLB107481",
+            ),
+        )
+        self.assertTrue(all(auth == "Bearer live" for _, auth in seen))
+
+    def test_unknown_catalog_id_returns_none(self):
+        client, tokens = catalog_client(product=(404, {}))
+        self.assertIsNone(run(fetch_catalog_product(client, tokens, "MLB24447228")))
+
+    def test_no_active_new_listing_is_unavailable_without_price(self):
+        only_used = {"results": [CATALOG_LISTINGS["results"][2]]}
+        client, tokens = catalog_client(listings=(200, only_used))
+        item = run(fetch_catalog_product(client, tokens, "MLB24447228"))
+        self.assertFalse(item.available)
+        self.assertIsNone(item.price)
+
+    def test_inactive_product_is_unavailable(self):
+        client, tokens = catalog_client(product=(200, dict(CATALOG_PAYLOAD, status="inactive")))
+        self.assertFalse(run(fetch_catalog_product(client, tokens, "MLB24447228")).available)
+
+    def test_forbidden_or_malformed_is_reported(self):
+        for bad in ((403, {}), (200, dict(CATALOG_PAYLOAD, name=""))):
+            with self.subTest(bad=bad):
+                client, tokens = catalog_client(product=bad)
+                with self.assertRaises(MarketplaceUnavailable):
+                    run(fetch_catalog_product(client, tokens, "MLB24447228"))
+
+    def test_listings_failure_is_reported(self):
+        client, tokens = catalog_client(listings=(500, {}))
+        with self.assertRaises(MarketplaceUnavailable):
+            run(fetch_catalog_product(client, tokens, "MLB24447228"))
+
+
+class FetchListingTests(unittest.TestCase):
+    def test_prefers_catalog_product(self):
+        client, tokens = catalog_client()
+        self.assertEqual(run(fetch_listing(client, tokens, "MLB24447228")).price, Decimal("38.98"))
+
+    def test_falls_back_to_item_when_not_a_catalog_product(self):
+        store = MemoryTokenStore(StoredTokens("live", "r", NOW + timedelta(hours=1)))
+
+        def handler(request):
+            if request.url.path.startswith("/products/"):
+                return httpx.Response(404, json={})
+            return httpx.Response(200, json=ITEM_PAYLOAD)
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        item = run(fetch_listing(client, token_manager(store, handler), "MLB3456789012"))
+        self.assertEqual(item.external_id, "MLB3456789012")
 
 
 class ResolveItemIdTests(unittest.TestCase):
