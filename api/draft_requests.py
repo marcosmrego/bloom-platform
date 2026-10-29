@@ -64,6 +64,31 @@ def _enqueue_once(get_db: Callable[[], Any], product_id: int) -> Optional[Dict[s
         conn.close()
 
 
+def pending_count(get_db: Callable[[], Any], tenant_slug: str) -> int:
+    """Count requests a worker could claim now, without reserving any.
+
+    Uses the same eligibility as `claim` (pending, or running but abandoned) so
+    a cheap pre-check can decide whether to wake the agent.
+    """
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM product_draft_requests r JOIN tenants t ON t.id = r.tenant_id
+            WHERE t.slug = %s
+              AND (r.status = 'pending'
+                   OR (r.status = 'running'
+                       AND r.claimed_at < NOW() - make_interval(mins => %s)))
+            """,
+            (tenant_slug, STALE_MINUTES),
+        )
+        return int(cur.fetchone()["n"])
+    finally:
+        conn.close()
+
+
 def claim(get_db: Callable[[], Any], tenant_slug: str) -> Optional[Dict[str, Any]]:
     """Hand the oldest pending request to a worker, reclaiming abandoned ones."""
     conn = get_db()
