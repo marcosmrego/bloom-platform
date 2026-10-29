@@ -354,6 +354,52 @@ def _handle_register_product(args: dict, **_kwargs) -> str:
         return tool_error(f"Bloom product registration failed: {exc}")
 
 
+def _handle_claim_draft_request(args: dict, **_kwargs) -> str:
+    try:
+        tenant = _tenant(args.get("tenant"))
+        if tenant != "viralbarato":
+            raise ValueError("Draft requests are enabled only for viralbarato")
+        base_url, _token = _config()
+        response = requests.post(
+            f"{base_url}/api/v1/{tenant}/editorial/draft-requests/claim",
+            headers=_headers(), timeout=TIMEOUT,
+        )
+        payload = _json_response(response)
+        payload["success"] = True
+        return tool_result(payload)
+    except Exception as exc:
+        return tool_error(f"Bloom draft request claim failed: {exc}")
+
+
+def _handle_finish_draft_request(args: dict, **_kwargs) -> str:
+    try:
+        tenant = _tenant(args.get("tenant"))
+        if tenant != "viralbarato":
+            raise ValueError("Draft requests are enabled only for viralbarato")
+        request_id = int(args.get("request_id"))
+        status = str(args.get("status") or "").strip()
+        if status not in {"completed", "failed"}:
+            raise ValueError("status must be completed or failed")
+        body: dict[str, Any] = {"status": status}
+        if status == "completed":
+            body["post_id"] = int(args.get("post_id"))
+        else:
+            error = str(args.get("error") or "").strip()
+            if not error:
+                raise ValueError("error is required when status is failed")
+            body["error"] = error[:500]
+        base_url, _token = _config()
+        response = requests.post(
+            f"{base_url}/api/v1/{tenant}/editorial/draft-requests/{request_id}/result",
+            headers=_headers(), json=body, timeout=TIMEOUT,
+        )
+        payload = _json_response(response)
+        payload["success"] = True
+        return tool_result(payload)
+    except Exception as exc:
+        return tool_error(f"Bloom draft request result failed: {exc}")
+
+
 def _handle_create_draft(args: dict, **_kwargs) -> str:
     try:
         tenant = _tenant(args.get("tenant"))
@@ -650,6 +696,41 @@ BLOOM_REGISTER_PRODUCT_SCHEMA = {
 }
 
 
+BLOOM_CLAIM_DRAFT_REQUEST_SCHEMA = {
+    "name": "bloom_claim_draft_request",
+    "description": (
+        "Take the oldest pending product draft request queued in the Bloom panel. "
+        "Returns request=null when the queue is empty. The product is already registered "
+        "and verified: use its external_id as post.product_external_id."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {"tenant": {"type": "string", "enum": ["viralbarato"]}},
+        "required": ["tenant"],
+    },
+}
+
+
+BLOOM_FINISH_DRAFT_REQUEST_SCHEMA = {
+    "name": "bloom_finish_draft_request",
+    "description": (
+        "Report the outcome of a claimed draft request: completed with the draft post_id, "
+        "or failed with a short reason the editor can read in the panel."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tenant": {"type": "string", "enum": ["viralbarato"]},
+            "request_id": {"type": "integer"},
+            "status": {"type": "string", "enum": ["completed", "failed"]},
+            "post_id": {"type": "integer"},
+            "error": {"type": "string", "maxLength": 500},
+        },
+        "required": ["tenant", "request_id", "status"],
+    },
+}
+
+
 BLOOM_CREATE_DRAFT_SCHEMA = {
     "name": "bloom_create_draft",
     "description": "Create an idempotent Bloom draft. This tool can never publish.",
@@ -735,6 +816,8 @@ def register(ctx) -> None:
         ("bloom_submit_traffic_recovery", BLOOM_SUBMIT_TRAFFIC_RECOVERY_SCHEMA, _handle_submit_traffic_recovery),
         ("bloom_submit_editorial_review", BLOOM_SUBMIT_EDITORIAL_REVIEW_SCHEMA, _handle_submit_editorial_review),
         ("bloom_register_product", BLOOM_REGISTER_PRODUCT_SCHEMA, _handle_register_product),
+        ("bloom_claim_draft_request", BLOOM_CLAIM_DRAFT_REQUEST_SCHEMA, _handle_claim_draft_request),
+        ("bloom_finish_draft_request", BLOOM_FINISH_DRAFT_REQUEST_SCHEMA, _handle_finish_draft_request),
         ("bloom_upload_media", BLOOM_UPLOAD_MEDIA_SCHEMA, _handle_upload_media),
         ("bloom_create_draft", BLOOM_CREATE_DRAFT_SCHEMA, _handle_create_draft),
     ):

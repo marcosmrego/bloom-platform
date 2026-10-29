@@ -61,5 +61,35 @@ class RegisterMercadoLivreProductEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
 
 
+REVIEW_URL = "/api/v1/editorial/review/products/mercadolivre"
+
+
+class ReviewPanelProductEndpointTests(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(main.app)
+        for target, value in (("REVIEW_API_TOKEN", "review-secret"), ("CONTENT_API_TOKEN", "test-secret")):
+            patcher = patch.object(main, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_requires_review_token(self):
+        self.assertEqual(self.client.post(REVIEW_URL, json=BODY).status_code, 401)
+
+    def test_automation_token_is_not_accepted(self):
+        response = self.client.post(REVIEW_URL, json=BODY, headers=AUTH)
+        self.assertEqual(response.status_code, 401)
+
+    def test_registers_viralbarato_product(self):
+        with patch.object(main, "get_mercadolivre_runtime", return_value=main.MercadoLivreRuntime(None, None)), patch.object(
+            main, "register_mercadolivre_product", AsyncMock(return_value=PRODUCT)
+        ), patch.object(main, "run_db_task", AsyncMock(return_value=SAVED)) as db:
+            response = self.client.post(
+                REVIEW_URL, json=BODY, headers={"Authorization": "Bearer review-secret"}
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["product_id"], 77)
+        self.assertEqual(db.await_args.args[2], "viralbarato")
+
+
 if __name__ == "__main__":
     unittest.main()
