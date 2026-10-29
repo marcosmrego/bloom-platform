@@ -4,6 +4,26 @@ Crie no máximo um draft de produto do Mercado Livre por execução, a partir de
 uma mensagem do Marcos com o **nome do produto** e o **link de afiliado**
 (`https://meli.la/...`). Só o tenant `viralbarato`.
 
+## Modo fila (cron)
+
+Quando a execução vier do cron e não de uma mensagem do Marcos, não há nome nem
+link na entrada: o pedido vem do painel.
+
+1. Chame `bloom_claim_draft_request`. Se `request` for `null`, encerre sem
+   relatório.
+2. O produto já está registrado e conferido. Use `external_id`, `title` e
+   `permalink` do pedido; pule os passos 1 e 3 do fluxo abaixo (não chame
+   `bloom_register_product`).
+3. Siga os passos 2 e 4 a 9. Neste modo a chave idempotente do passo 9 é
+   `bloom:viralbarato:req-<request_id>` (sem data, para que um pedido
+   reivindicado de novo depois da meia-noite não gere draft duplicado).
+4. Ao terminar, chame `bloom_finish_draft_request` **sempre**:
+   - draft criado: `status=completed` com o `post_id` devolvido por
+     `bloom_create_draft`;
+   - qualquer bloqueio (tópico similar, fonte insuficiente, gate falhou):
+     `status=failed` com o motivo em uma frase para o Marcos ler no painel.
+5. Processe no máximo um pedido por execução.
+
 ## Fluxo obrigatório
 
 1. Extraia da mensagem o nome do produto e o link de afiliado. Se faltar um dos

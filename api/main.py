@@ -35,6 +35,7 @@ from marketplace_store import PostgresTokenStore, upsert_mercadolivre_product
 from mercadolivre_client import MercadoLivreCredentials, MercadoLivreTokenManager
 from marketplaces import classify_commerce_url, validate_mercadolivre_destination
 from product_registration import register_mercadolivre_product
+import draft_requests
 
 # ── Config ────────────────────────────────────────
 def get_db_password():
@@ -2530,13 +2531,7 @@ def get_mercadolivre_runtime() -> MercadoLivreRuntime:
     return mercadolivre_runtime
 
 
-@app.post("/api/v1/{tenant_slug}/editorial/products/mercadolivre")
-async def register_mercadolivre_product_endpoint(
-    tenant_slug: str,
-    data: MercadoLivreProductRegister,
-    authorization: Optional[str] = Header(default=None),
-):
-    require_content_token(authorization)
+async def _register_mercadolivre_product(tenant_slug: str, data: MercadoLivreProductRegister) -> dict:
     if tenant_slug != "viralbarato":
         raise HTTPException(status_code=422, detail="Mercado Livre products are enabled only for ViralBarato")
     runtime = get_mercadolivre_runtime()
@@ -2554,6 +2549,86 @@ async def register_mercadolivre_product_endpoint(
         "image_url": product.image_url,
         "permalink": product.permalink,
     }
+
+
+@app.post("/api/v1/{tenant_slug}/editorial/products/mercadolivre")
+async def register_mercadolivre_product_endpoint(
+    tenant_slug: str,
+    data: MercadoLivreProductRegister,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_content_token(authorization)
+    return await _register_mercadolivre_product(tenant_slug, data)
+
+
+@app.post("/api/v1/editorial/review/products/mercadolivre")
+async def review_register_mercadolivre_product(
+    data: MercadoLivreProductRegister,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_review_token(authorization)
+    return await _register_mercadolivre_product("viralbarato", data)
+
+
+class DraftRequestResult(BaseModel):
+    status: Literal["completed", "failed"]
+    post_id: Optional[int] = None
+    error: Optional[str] = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def _check_outcome(self):
+        if self.status == "completed" and self.post_id is None:
+            raise ValueError("post_id is required when status is completed")
+        if self.status == "failed" and not self.error:
+            raise ValueError("error is required when status is failed")
+        return self
+
+
+@app.post("/api/v1/editorial/review/products/{product_id}/draft-request")
+async def review_enqueue_draft_request(
+    product_id: int,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_review_token(authorization)
+    result = await run_db_task(draft_requests.enqueue, get_db, product_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Mercado Livre product not found")
+    return result
+
+
+@app.get("/api/v1/editorial/review/products/draft-requests")
+async def review_list_draft_requests(authorization: Optional[str] = Header(default=None)):
+    require_review_token(authorization)
+    return {"items": await run_db_task(draft_requests.list_recent, get_db)}
+
+
+@app.post("/api/v1/{tenant_slug}/editorial/draft-requests/claim")
+async def claim_draft_request(
+    tenant_slug: str,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_content_token(authorization)
+    if tenant_slug != draft_requests.TENANT:
+        raise HTTPException(status_code=422, detail="Draft requests are enabled only for ViralBarato")
+    return {"request": await run_db_task(draft_requests.claim, get_db, tenant_slug)}
+
+
+@app.post("/api/v1/{tenant_slug}/editorial/draft-requests/{request_id}/result")
+async def finish_draft_request(
+    tenant_slug: str,
+    request_id: int,
+    data: DraftRequestResult,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_content_token(authorization)
+    done = await run_db_task(
+        draft_requests.finish, get_db, tenant_slug, request_id, data.status, data.post_id, data.error
+    )
+    if done == "not_running":
+        raise HTTPException(status_code=404, detail="Running draft request not found")
+    if done == "invalid_post":
+        raise HTTPException(status_code=422, detail="post_id does not belong to this tenant")
+    return {"status": data.status}
 
 
 @app.get("/api/v1/{tenant_slug}/editorial/monetization/backlog")
