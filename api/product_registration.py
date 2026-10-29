@@ -11,7 +11,7 @@ from marketplaces import normalize_mercadolivre_id, validate_mercadolivre_destin
 from mercadolivre_client import (
     MarketplaceUnavailable,
     MercadoLivreTokenManager,
-    fetch_item,
+    fetch_listing,
     name_matches_title,
     resolve_item_id,
 )
@@ -47,7 +47,7 @@ async def register_mercadolivre_product(
             )
     link = validate_mercadolivre_destination("product", affiliate_link, resolved_id)
     try:
-        item = await fetch_item(client, tokens, resolved_id)
+        item = await fetch_listing(client, tokens, resolved_id)
     except MarketplaceUnavailable as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     if item.external_id != resolved_id:

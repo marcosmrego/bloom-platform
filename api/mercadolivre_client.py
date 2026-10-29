@@ -17,6 +17,7 @@ API_BASE = "https://api.mercadolibre.com"
 TOKEN_URL = f"{API_BASE}/oauth/token"
 TOKEN_EXPIRY_MARGIN = timedelta(seconds=60)
 MAX_REDIRECTS = 5
+CATALOG_PERMALINK = "https://www.mercadolivre.com.br/p/{}"
 MIN_NAME_OVERLAP = 0.5
 _ITEM_ID = re.compile(r"MLB-?(\d{6,})", re.IGNORECASE)
 _STOPWORDS = frozenset({"para", "com", "sem", "kit", "uma", "por", "dos", "das"})
@@ -154,6 +155,59 @@ async def fetch_item(
     if response.status_code != 200:
         raise MarketplaceUnavailable(f"Mercado Livre item lookup failed (HTTP {response.status_code})")
     return parse_item(response.json())
+
+
+async def _get_json(client: httpx.AsyncClient, tokens: MercadoLivreTokenManager, path: str):
+    token = await tokens.access_token()
+    try:
+        return await client.get(f"{API_BASE}{path}", headers={"Authorization": f"Bearer {token}"})
+    except httpx.HTTPError as exc:
+        raise MarketplaceUnavailable(f"Mercado Livre lookup failed: {type(exc).__name__}") from exc
+
+
+async def fetch_catalog_product(
+    client: httpx.AsyncClient, tokens: MercadoLivreTokenManager, product_id: str
+) -> Optional[MercadoLivreItem]:
+    """Catalog product (/p/MLB...) priced by its cheapest new listing; None if not a catalog id."""
+    response = await _get_json(client, tokens, f"/products/{product_id}")
+    if response.status_code == 404:
+        return None
+    if response.status_code != 200:
+        raise MarketplaceUnavailable(f"Mercado Livre product lookup failed (HTTP {response.status_code})")
+    product = response.json()
+    title = str(product.get("name") or "").strip()
+    if str(product.get("id") or "") != product_id or not title:
+        raise MarketplaceUnavailable("Mercado Livre product payload is malformed")
+    listings_response = await _get_json(client, tokens, f"/products/{product_id}/items")
+    if listings_response.status_code != 200:
+        raise MarketplaceUnavailable(
+            f"Mercado Livre product listings failed (HTTP {listings_response.status_code})"
+        )
+    new_listings = [
+        listing
+        for listing in listings_response.json().get("results") or []
+        if listing.get("condition") == "new" and listing.get("price") is not None
+    ]
+    best = min(new_listings, key=lambda listing: Decimal(str(listing["price"])), default=None)
+    pictures = product.get("pictures") or []
+    return MercadoLivreItem(
+        external_id=product_id,
+        title=title,
+        price=Decimal(str(best["price"])).quantize(Decimal("0.01")) if best else None,
+        permalink=CATALOG_PERMALINK.format(product_id),
+        image_url=(pictures[0].get("url") if pictures else None),
+        available=product.get("status") == "active" and best is not None,
+        category_id=best.get("category_id") if best else None,
+    )
+
+
+async def fetch_listing(
+    client: httpx.AsyncClient, tokens: MercadoLivreTokenManager, listing_id: str
+) -> MercadoLivreItem:
+    """Resolve a catalog product first, then a plain listing."""
+    return await fetch_catalog_product(client, tokens, listing_id) or await fetch_item(
+        client, tokens, listing_id
+    )
 
 
 def _item_id_from_url(url: str) -> Optional[str]:

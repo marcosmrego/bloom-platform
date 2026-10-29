@@ -31,11 +31,13 @@ class FixedStore:
         raise AssertionError("token must not be refreshed")
 
 
-def register(name, link, item=ITEM, item_status=200, item_id=None, short_target=LISTING):
+def register(name, link, item=ITEM, item_status=200, item_id=None, short_target=LISTING, catalog=None, catalog_status=404):
     def handler(request):
         url = str(request.url)
         if request.url.host == "meli.la":
             return httpx.Response(302, headers={"location": short_target})
+        if request.url.path.startswith("/products/"):
+            return httpx.Response(catalog_status, json=catalog or {})
         if request.url.path.startswith("/items/"):
             return httpx.Response(item_status, json=item)
         return httpx.Response(200)
@@ -88,6 +90,29 @@ class RegisterMercadoLivreProductTests(unittest.TestCase):
     def test_rejects_foreign_affiliate_link(self):
         with self.assertRaises(HTTPException) as ctx:
             register("organizador de cabos", "https://evil.test/MLB-3456789012")
+        self.assertEqual(ctx.exception.status_code, 422)
+
+    def test_registers_catalog_product_from_product_code(self):
+        catalog = {
+            "id": "MLB24447228",
+            "name": "Chaleira De Vidro 1200ml Com Infusor",
+            "status": "active",
+            "pictures": [{"url": "https://http2.mlstatic.com/D_1.jpg"}],
+            "results": [{"item_id": "MLB3714053599", "price": 38.98, "condition": "new", "category_id": "MLB107481"}],
+        }
+        product = register(
+            "Chaleira de vidro 1200ml com infusor", SHORT_LINK, item_id="MLB24447228",
+            catalog=catalog, catalog_status=200,
+        )
+        self.assertEqual(product.external_id, "MLB24447228")
+        self.assertEqual(str(product.price), "38.98")
+        self.assertEqual(product.permalink, "https://www.mercadolivre.com.br/p/MLB24447228")
+        self.assertEqual(product.affiliate_link, SHORT_LINK)
+
+    def test_catalog_product_without_listing_is_rejected(self):
+        catalog = {"id": "MLB24447228", "name": "Chaleira De Vidro", "status": "active", "pictures": [], "results": []}
+        with self.assertRaises(HTTPException) as ctx:
+            register("chaleira de vidro", SHORT_LINK, item_id="MLB24447228", catalog=catalog, catalog_status=200)
         self.assertEqual(ctx.exception.status_code, 422)
 
 
