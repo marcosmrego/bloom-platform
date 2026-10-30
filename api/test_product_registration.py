@@ -31,11 +31,21 @@ class FixedStore:
         raise AssertionError("token must not be refreshed")
 
 
-def register(name, link, item=ITEM, item_status=200, item_id=None, short_target=LISTING, catalog=None, catalog_status=404):
+SOCIAL_TARGET = "https://www.mercadolivre.com.br/social/afiliado?matt_word=afiliado"
+
+
+def social_page(title, *product_ids):
+    ids = "".join(f'"product_id":"{pid}",' for pid in product_ids)
+    return f'<html><head><meta property="og:title" content="{title}"/></head><body>{{{ids}}}</body></html>'
+
+
+def register(name, link, item=ITEM, item_status=200, item_id=None, short_target=LISTING, catalog=None, catalog_status=404, social_body=""):
     def handler(request):
         url = str(request.url)
         if request.url.host == "meli.la":
             return httpx.Response(302, headers={"location": short_target})
+        if request.url.path.startswith("/social/"):
+            return httpx.Response(200, text=social_body)
         if request.url.path.startswith("/products/"):
             return httpx.Response(catalog_status, json=catalog or {})
         if request.url.path.startswith("/items/"):
@@ -113,6 +123,82 @@ class RegisterMercadoLivreProductTests(unittest.TestCase):
         catalog = {"id": "MLB24447228", "name": "Chaleira De Vidro", "status": "active", "pictures": [], "results": []}
         with self.assertRaises(HTTPException) as ctx:
             register("chaleira de vidro", SHORT_LINK, item_id="MLB24447228", catalog=catalog, catalog_status=200)
+        self.assertEqual(ctx.exception.status_code, 422)
+
+
+CATALOG = {
+    "id": "MLB24117280",
+    "name": "Fone De Ouvido Headphone Dapon H02D Bluetooth 5.1 Over-ear 22h Preto",
+    "status": "active",
+    "pictures": [{"url": "https://http2.mlstatic.com/D_2.jpg"}],
+    "results": [{"item_id": "MLB3714053599", "price": 76.53, "condition": "new", "category_id": "MLB1000"}],
+}
+
+
+class RegisterFromSocialPageTests(unittest.TestCase):
+    def register_social(self, name=None, body=None, **extra):
+        page = body if body is not None else social_page(
+            "Fone De Ouvido Headphone Dapon H02D Bluetooth 5.1 Over-ear 22h Preto - R$ 76,53",
+            "MLB24117280", "MLB76575845",
+        )
+        return register(
+            name, SHORT_LINK, short_target=SOCIAL_TARGET, social_body=page,
+            catalog=CATALOG, catalog_status=200, **extra,
+        )
+
+    def test_registers_from_the_link_alone(self):
+        product = self.register_social()
+        self.assertEqual(product.external_id, "MLB24117280")
+        self.assertEqual(product.title, CATALOG["name"])
+        self.assertEqual(product.affiliate_link, SHORT_LINK)
+
+    def test_uses_the_first_product_not_the_recommended_ones(self):
+        self.assertEqual(self.register_social().external_id, "MLB24117280")
+
+    def test_given_name_is_still_checked_against_the_listing(self):
+        product = self.register_social(name="fone dapon h02d bluetooth")
+        self.assertEqual(product.external_id, "MLB24117280")
+        with self.assertRaises(HTTPException) as ctx:
+            self.register_social(name="liquidificador mondial")
+        self.assertEqual(ctx.exception.status_code, 422)
+
+    def test_rejects_page_whose_title_disagrees_with_the_listing(self):
+        body = social_page("Liquidificador Mondial 800W Preto - R$ 99,00", "MLB24117280")
+        with self.assertRaises(HTTPException) as ctx:
+            self.register_social(body=body)
+        self.assertEqual(ctx.exception.status_code, 422)
+
+    def test_page_without_a_product_asks_for_the_item_id(self):
+        with self.assertRaises(HTTPException) as ctx:
+            self.register_social(body="<html>nada</html>")
+        self.assertEqual(ctx.exception.status_code, 422)
+
+    def test_page_without_a_title_needs_the_name(self):
+        body = social_page("", "MLB24117280")
+        with self.assertRaises(HTTPException) as ctx:
+            self.register_social(body=body)
+        self.assertEqual(ctx.exception.status_code, 422)
+        product = self.register_social(name="fone dapon h02d", body=body)
+        self.assertEqual(product.external_id, "MLB24117280")
+
+    def test_title_is_read_whatever_the_attribute_order_or_quotes(self):
+        body = "<meta content='Fone Dapon H02D Bluetooth - R$ 76,53' property='og:title'>" + '{"product_id":"MLB24117280"}'
+        self.assertEqual(self.register_social(body=body).external_id, "MLB24117280")
+
+    def test_html_entities_in_the_title_are_decoded(self):
+        body = social_page("Fone Dapon &amp; H02D Bluetooth", "MLB24117280")
+        self.assertEqual(self.register_social(body=body).external_id, "MLB24117280")
+
+    def test_oversized_page_is_not_read(self):
+        padding = "x" * (3 * 1024 * 1024)
+        body = social_page("Fone Dapon H02D", "MLB24117280") + padding
+        with self.assertRaises(HTTPException) as ctx:
+            self.register_social(body=body)
+        self.assertEqual(ctx.exception.status_code, 422)
+
+    def test_link_with_explicit_port_is_rejected(self):
+        with self.assertRaises(HTTPException) as ctx:
+            register(None, "https://meli.la:8443/2AbCdEf", short_target=SOCIAL_TARGET)
         self.assertEqual(ctx.exception.status_code, 422)
 
 

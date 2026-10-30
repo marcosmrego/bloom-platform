@@ -333,12 +333,14 @@ def _handle_register_product(args: dict, **_kwargs) -> str:
         if tenant != "viralbarato":
             raise ValueError("Mercado Livre products are enabled only for viralbarato")
         name = str(args.get("name") or "").strip()
-        if not 3 <= len(name) <= 200:
+        if name and not 3 <= len(name) <= 200:
             raise ValueError("name must contain 3-200 characters")
         affiliate_link = str(args.get("affiliate_link") or "").strip()
         if urlparse(affiliate_link).scheme != "https":
             raise ValueError("affiliate_link must be an HTTPS URL")
-        body: dict[str, Any] = {"name": name, "affiliate_link": affiliate_link}
+        body: dict[str, Any] = {"affiliate_link": affiliate_link}
+        if name:
+            body["name"] = name
         item_id = str(args.get("item_id") or "").strip()
         if item_id:
             body["item_id"] = item_id
@@ -676,8 +678,8 @@ BLOOM_SUBMIT_EDITORIAL_REVIEW_SCHEMA = {
 BLOOM_REGISTER_PRODUCT_SCHEMA = {
     "name": "bloom_register_product",
     "description": (
-        "Register a Mercado Livre affiliate product for ViralBarato from its name and "
-        "affiliate link. Bloom verifies the item behind the link and returns the "
+        "Register a Mercado Livre affiliate product for ViralBarato from its affiliate "
+        "link (the name is optional and, when given, is checked against the link). Bloom verifies the item behind the link and returns the "
         "external_id to use as post.product_external_id. It never publishes."
     ),
     "parameters": {
@@ -691,7 +693,7 @@ BLOOM_REGISTER_PRODUCT_SCHEMA = {
                 "description": "Optional MLB item id, only when the link does not reveal the item.",
             },
         },
-        "required": ["tenant", "name", "affiliate_link"],
+        "required": ["tenant", "affiliate_link"],
     },
 }
 

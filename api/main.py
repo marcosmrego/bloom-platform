@@ -2490,7 +2490,7 @@ async def create_affiliate_search_destination(
 
 
 class MercadoLivreProductRegister(BaseModel):
-    name: str = Field(min_length=3, max_length=200)
+    name: Optional[str] = Field(default=None, min_length=3, max_length=200)
     affiliate_link: str = Field(min_length=10, max_length=1000)
     item_id: Optional[str] = Field(default=None, max_length=20)
 
