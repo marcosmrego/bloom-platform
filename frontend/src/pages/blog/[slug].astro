@@ -3,7 +3,7 @@ import { marked } from 'marked';
 import { getPost } from '../../lib/api';
 import { getTenantFromHost } from '../../lib/tenant';
 import { getPostImage, getSiteConfig } from '../../lib/site';
-import { affiliateDisclosure, buyLabel, marketplaceFromUrl } from '../../lib/marketplace';
+import { affiliateDisclosure, buyLabel, isProductPhoto, marketplaceFromUrl, PRODUCT_PHOTO_CREDIT } from '../../lib/marketplace';
 import SeoHead from '../../components/SeoHead.astro';
 import MonetizationHead from '../../components/MonetizationHead.astro';
 import MonetizationBody from '../../components/MonetizationBody.astro';
@@ -29,6 +29,7 @@ const price = post.price || post.product_price;
 const tenantConfig = getSiteConfig(TENANT);
 const brandLogo = tenantConfig.brandLogo;
 const heroImage = getPostImage(tenantConfig, post);
+const heroIsProductPhoto = isProductPhoto(post.image_url);
 const seoTitle = post.seo_title || `${post.title} — ${tenantConfig.name}`;
 const seoDescription = post.seo_description || post.excerpt || post.title;
 const articleJsonLd = {
@@ -73,6 +74,9 @@ const articleJsonLd = {
     .cat-badge { background: #f0f0f5; padding: 0.3rem 0.8rem; border-radius: 20px; font-size: 0.82rem; color: #777; font-weight: 600; }
     .content { font-size: 1.05rem; color: #2d2d3a; }
     .hero-image { width: 100%; max-height: 440px; object-fit: cover; border-radius: 10px; margin-bottom: 1.5rem; }
+    .hero-product { margin: 0 0 1.5rem; border-radius: 10px; background: #f1f2f4; border: 1px solid #e6e8eb; padding: 1rem; text-align: center; }
+    .hero-product img { display: block; width: auto; max-width: 100%; height: auto; max-height: 440px; margin: 0 auto; object-fit: contain; }
+    .hero-product figcaption { margin-top: .6rem; font-size: .78rem; color: #6d746f; line-height: 1.3; }
     .content :global(h2) { font-size: 1.35rem; margin: 2rem 0 0.8rem; padding-bottom: 0.4rem; border-bottom: 2px solid #f0f0f0; color: #1a1a2e; }
     .content :global(h3) { font-size: 1.15rem; margin: 1.5rem 0 0.5rem; }
     .content :global(p) { margin-bottom: 1rem; }
@@ -123,7 +127,14 @@ const articleJsonLd = {
     <article>
       {post.category_name && <span class="cat-badge">{post.category_name}</span>}
       <h1>{post.title}</h1>
-      <img class="hero-image" src={heroImage} alt={post.title} />
+      {heroIsProductPhoto ? (
+        <figure class="hero-product">
+          <img src={heroImage} alt={post.title} />
+          <figcaption>Foto: {PRODUCT_PHOTO_CREDIT}</figcaption>
+        </figure>
+      ) : (
+        <img class="hero-image" src={heroImage} alt={post.title} />
+      )}
 
       <div class="meta">
         {post.rating && <span class="rating">{stars} <strong>{post.rating}/5</strong></span>}

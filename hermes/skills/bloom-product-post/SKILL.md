@@ -51,9 +51,13 @@ link na entrada: o pedido vem do painel.
      O preço é exibido pelo sistema; no texto ele envelhece.
    - Use só especificações confirmadas nas fontes extraídas.
    - Não mencione o processo de IA e não faça promessas de "menor preço".
-7. Gere uma imagem editorial landscape sem marcas, logotipos, textos ou
-   embalagens copiadas, e envie com `bloom_upload_media`. Use somente a URL
-   retornada pelo Bloom.
+7. Use a foto principal do anúncio como imagem do post: chame
+   `bloom_product_photo` com o `external_id` do passo 3 e use somente o
+   `image_url` retornado (o site mostra a foto inteira sobre fundo neutro e
+   exibe o crédito "Foto: Mercado Livre"). Não gere imagem por IA quando a
+   ferramenta funcionar. Só se ela falhar (produto sem foto ou erro do
+   Mercado Livre), gere uma imagem editorial landscape sem marcas, logotipos,
+   textos ou embalagens copiadas e envie com `bloom_upload_media`.
 8. Execute os gates da skill `bloom-editorial` (estrutura, fontes, imagem,
    placeholders). Em qualquer falha, não chame `bloom_create_draft`; responda
    `needs_review` com o gate que falhou.

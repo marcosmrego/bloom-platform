@@ -356,6 +356,36 @@ def _handle_register_product(args: dict, **_kwargs) -> str:
         return tool_error(f"Bloom product registration failed: {exc}")
 
 
+def _handle_product_photo(args: dict, **_kwargs) -> str:
+    try:
+        tenant = _tenant(args.get("tenant"))
+        if tenant != "viralbarato":
+            raise ValueError("Mercado Livre products are enabled only for viralbarato")
+        external_id = str(args.get("external_id") or "").strip().upper().replace("MLB-", "MLB", 1)
+        if not re.fullmatch(r"MLB\d{6,}", external_id):
+            raise ValueError("external_id must look like MLB24117280")
+        base_url, _token = _config()
+        response = requests.post(
+            f"{base_url}/api/v1/{tenant}/editorial/products/{external_id}/photo",
+            headers=_headers(), timeout=TIMEOUT,
+        )
+        payload = _json_response(response)
+        media_url = str(payload.get("image_url") or "")
+        if not media_url.startswith(f"/media/{tenant}/product/") or not media_url.endswith(".webp"):
+            raise RuntimeError("Bloom returned an invalid product photo URL")
+        verification = requests.get(f"{base_url}{media_url}", headers=_headers(), timeout=TIMEOUT)
+        if (
+            verification.status_code != 200
+            or verification.headers.get("content-type", "").split(";", 1)[0] != "image/webp"
+        ):
+            raise RuntimeError("Persisted product photo did not return HTTP 200 WebP")
+        payload["success"] = True
+        payload["http_verified"] = True
+        return tool_result(payload)
+    except Exception as exc:
+        return tool_error(f"Bloom product photo failed: {exc}")
+
+
 def _handle_claim_draft_request(args: dict, **_kwargs) -> str:
     try:
         tenant = _tenant(args.get("tenant"))
@@ -698,6 +728,24 @@ BLOOM_REGISTER_PRODUCT_SCHEMA = {
 }
 
 
+BLOOM_PRODUCT_PHOTO_SCHEMA = {
+    "name": "bloom_product_photo",
+    "description": (
+        "Store the main Mercado Livre listing photo of a registered product as the post image. "
+        "Returns image_url (use it as post.image_url) and the credit. Fails when the product "
+        "has no photo; only then generate an editorial image instead."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tenant": {"type": "string", "enum": ["viralbarato"]},
+            "external_id": {"type": "string", "description": "The product external_id, e.g. MLB24117280."},
+        },
+        "required": ["tenant", "external_id"],
+    },
+}
+
+
 BLOOM_CLAIM_DRAFT_REQUEST_SCHEMA = {
     "name": "bloom_claim_draft_request",
     "description": (
@@ -818,6 +866,7 @@ def register(ctx) -> None:
         ("bloom_submit_traffic_recovery", BLOOM_SUBMIT_TRAFFIC_RECOVERY_SCHEMA, _handle_submit_traffic_recovery),
         ("bloom_submit_editorial_review", BLOOM_SUBMIT_EDITORIAL_REVIEW_SCHEMA, _handle_submit_editorial_review),
         ("bloom_register_product", BLOOM_REGISTER_PRODUCT_SCHEMA, _handle_register_product),
+        ("bloom_product_photo", BLOOM_PRODUCT_PHOTO_SCHEMA, _handle_product_photo),
         ("bloom_claim_draft_request", BLOOM_CLAIM_DRAFT_REQUEST_SCHEMA, _handle_claim_draft_request),
         ("bloom_finish_draft_request", BLOOM_FINISH_DRAFT_REQUEST_SCHEMA, _handle_finish_draft_request),
         ("bloom_upload_media", BLOOM_UPLOAD_MEDIA_SCHEMA, _handle_upload_media),

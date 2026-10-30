@@ -31,9 +31,10 @@ from PIL import Image, UnidentifiedImageError
 from typing import Optional, List, Dict, Any, Literal
 
 import httpx
-from marketplace_store import PostgresTokenStore, upsert_mercadolivre_product
+from marketplace_store import PostgresTokenStore, get_mercadolivre_photo_url, upsert_mercadolivre_product
 from mercadolivre_client import MercadoLivreCredentials, MercadoLivreTokenManager
-from marketplaces import classify_commerce_url, validate_mercadolivre_destination
+from marketplaces import classify_commerce_url, normalize_mercadolivre_id, validate_mercadolivre_destination
+from product_photos import PHOTO_CREDIT, PRODUCT_PHOTO_MIN_SIDE, ProductPhotoError, fetch_product_photo
 from product_registration import register_mercadolivre_product
 import draft_requests
 
@@ -574,12 +575,12 @@ def validate_editorial_structure(
     }
 
 
-def normalize_webp(content: bytes) -> bytes:
+def normalize_webp(content: bytes, min_width: int = 640, min_height: int = 360) -> bytes:
     """Valida uma imagem raster e devolve WebP sem metadados."""
     try:
         with Image.open(BytesIO(content)) as source:
             width, height = source.size
-            if width < 640 or height < 360:
+            if width < min_width or height < min_height:
                 raise ValueError("Image dimensions are too small")
             if width * height > MAX_IMAGE_PIXELS:
                 raise ValueError("Image dimensions are too large")
@@ -2955,8 +2956,16 @@ async def upload_post_media(
     if not await run_db_task(_tenant_exists, tenant_slug):
         raise HTTPException(status_code=404, detail="Tenant not found")
 
+    stored = persist_webp(tenant_slug, webp_content)
+    return {"status": "stored", **stored}
+
+
+def persist_webp(tenant_slug: str, webp_content: bytes, subdir: str = "") -> dict:
+    """Grava um WebP deduplicado em MEDIA_ROOT/<tenant>[/<subdir>] e devolve sua URL."""
+    if not re.fullmatch(r"[a-z0-9-]+", tenant_slug) or (subdir and not re.fullmatch(r"[a-z0-9-]+", subdir)):
+        raise ValueError("Invalid media folder")
     digest = hashlib.sha256(webp_content).hexdigest()
-    tenant_dir = MEDIA_ROOT / tenant_slug
+    tenant_dir = MEDIA_ROOT / tenant_slug / subdir if subdir else MEDIA_ROOT / tenant_slug
     tenant_dir.mkdir(parents=True, exist_ok=True)
     final_path = tenant_dir / f"{digest}.webp"
     if not final_path.exists():
@@ -2968,13 +2977,40 @@ async def upload_post_media(
             temporary_path.replace(final_path)
         finally:
             temporary_path.unlink(missing_ok=True)
-
+    folder = f"{tenant_slug}/{subdir}" if subdir else tenant_slug
     return {
-        "status": "stored",
         "sha256": digest,
-        "image_url": f"/media/{tenant_slug}/{digest}.webp",
+        "image_url": f"/media/{folder}/{digest}.webp",
         "bytes": len(webp_content),
     }
+
+
+@app.post("/api/v1/{tenant_slug}/editorial/products/{external_id}/photo")
+async def store_mercadolivre_product_photo(
+    tenant_slug: str,
+    external_id: str,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Baixa a foto principal do produto no CDN do Mercado Livre e a guarda como WebP."""
+    require_content_token(authorization)
+    if tenant_slug != "viralbarato":
+        raise HTTPException(status_code=422, detail="Mercado Livre products are enabled only for ViralBarato")
+    item_id = normalize_mercadolivre_id(external_id)
+    photo_url = await run_db_task(get_mercadolivre_photo_url, get_db, tenant_slug, item_id)
+    if not photo_url:
+        raise HTTPException(status_code=404, detail="Mercado Livre product photo not found")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            content = await fetch_product_photo(client, photo_url)
+    except ProductPhotoError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    try:
+        webp_content = normalize_webp(content, PRODUCT_PHOTO_MIN_SIDE, PRODUCT_PHOTO_MIN_SIDE)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    stored = persist_webp(tenant_slug, webp_content, subdir="product")
+    return {"status": "stored", "credit": PHOTO_CREDIT, **stored}
+
 
 # ── CLICKS ─────────────────────────────────────────
 def _analytics_fields(data: AnalyticsAttribution) -> Dict[str, Optional[str]]:
