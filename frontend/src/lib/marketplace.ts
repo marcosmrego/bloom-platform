@@ -33,3 +33,12 @@ export function affiliateDisclosure(marketplace: Marketplace): string {
     ? 'Como participante do Programa de Afiliados do Mercado Livre, podemos receber comissão por compras qualificadas.'
     : 'Como participante do Programa de Associados da Amazon, podemos receber comissão por compras qualificadas.';
 }
+
+export const PRODUCT_PHOTO_CREDIT = 'Mercado Livre';
+
+const PRODUCT_PHOTO_PATH = /^(?:https:\/\/[^/]+)?\/media\/[a-z0-9-]+\/product\/[0-9a-f]{64}\.webp$/;
+
+/** Bloom stores the listing photo of a product under /media/<tenant>/product/. */
+export function isProductPhoto(image?: string | null): boolean {
+  return PRODUCT_PHOTO_PATH.test(image ?? '');
+}

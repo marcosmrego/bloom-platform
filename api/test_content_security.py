@@ -550,6 +550,19 @@ class EditorialStructureGateTests(unittest.TestCase):
         self.assertTrue(result["structure_valid"])
         self.assertGreaterEqual(result["word_count"], 180)
 
+    def test_accepts_product_photo_stored_in_the_product_folder(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            media_root = Path(temp_dir)
+            image = media_root / "mundonoprato" / "product" / "photo.webp"
+            image.parent.mkdir(parents=True)
+            image.write_bytes(b"RIFF-test-WEBP")
+            with patch.object(main, "MEDIA_ROOT", media_root):
+                result = validate_editorial_structure(
+                    self.valid_post("/media/mundonoprato/product/photo.webp"),
+                    "mundonoprato",
+                )
+        self.assertTrue(result["structure_valid"])
+
     def test_rejects_placeholder_or_missing_image(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             media_root = Path(temp_dir)

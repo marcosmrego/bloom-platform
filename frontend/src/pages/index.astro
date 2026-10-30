@@ -2,6 +2,7 @@
 import { getPosts, getCategories } from '../lib/api';
 import { getTenantFromHost } from '../lib/tenant';
 import { getPostImage, getSiteConfig } from '../lib/site';
+import { isProductPhoto } from '../lib/marketplace';
 import SeoHead from '../components/SeoHead.astro';
 import MonetizationHead from '../components/MonetizationHead.astro';
 import MonetizationBody from '../components/MonetizationBody.astro';
@@ -48,6 +49,7 @@ const websiteJsonLd = [
     .card { background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04); transition: transform 0.2s, box-shadow 0.2s; }
     .card:hover { transform: translateY(-4px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
     .card img { width: 100%; height: 200px; object-fit: cover; }
+    .card img.product-photo { object-fit: contain; background: #f1f2f4; padding: 0.5rem; }
     .card-body { padding: 1.1rem; }
     .card-cat { display: inline-block; background: #f0f0f5; color: #777; padding: 0.2rem 0.7rem; border-radius: 12px; font-size: 0.72rem; margin-bottom: 0.6rem; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
     .card-title { font-size: 1rem; font-weight: 600; margin-bottom: 0.4rem; line-height: 1.35; }
@@ -82,7 +84,7 @@ const websiteJsonLd = [
     <div class="posts-grid">
       {posts.map(post => (
         <article class="card">
-          <img src={getPostImage(config, post)} alt={post.title} loading="lazy" />
+          <img class={isProductPhoto(post.image_url) ? 'product-photo' : undefined} src={getPostImage(config, post)} alt={post.title} loading="lazy" />
           <div class="card-body">
             <span class="card-cat">{post.category_name || 'Geral'}</span>
             <h2 class="card-title">

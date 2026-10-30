@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { affiliateDisclosure, buyLabel, marketplaceFromUrl } from './marketplace.ts';
+import { affiliateDisclosure, buyLabel, isProductPhoto, marketplaceFromUrl, PRODUCT_PHOTO_CREDIT } from './marketplace.ts';
 
 test('detects the marketplace from the affiliate URL', () => {
   assert.equal(marketplaceFromUrl('https://www.amazon.com.br/dp/B0ABCDE123?tag=x-20'), 'amazon');
@@ -27,4 +27,24 @@ test('disclosure matches the affiliate program of the marketplace', () => {
   assert.match(affiliateDisclosure('amazon'), /Programa de Associados da Amazon/);
   assert.match(affiliateDisclosure('mercadolivre'), /Programa de Afiliados do Mercado Livre/);
   assert.doesNotMatch(affiliateDisclosure('mercadolivre'), /Amazon/);
+});
+
+const HASH = 'a'.repeat(64);
+
+test('recognises the product photo stored by Bloom', () => {
+  assert.equal(isProductPhoto(`/media/viralbarato/product/${HASH}.webp`), true);
+  assert.equal(isProductPhoto(`https://api.expansao-ai.com.br/media/viralbarato/product/${HASH}.webp`), true);
+});
+
+test('does not treat editorial or foreign images as product photos', () => {
+  assert.equal(isProductPhoto(`/media/viralbarato/${HASH}.webp`), false);
+  assert.equal(isProductPhoto(`/media/viralbarato/product/../${HASH}.webp`), false);
+  assert.equal(isProductPhoto(`https://evil.test/product/${HASH}.webp`), false);
+  assert.equal(isProductPhoto('/media/viralbarato/product/short.webp'), false);
+  assert.equal(isProductPhoto(undefined), false);
+  assert.equal(isProductPhoto(null), false);
+});
+
+test('credits the marketplace that owns the photo', () => {
+  assert.equal(PRODUCT_PHOTO_CREDIT, 'Mercado Livre');
 });

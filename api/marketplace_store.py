@@ -96,3 +96,23 @@ def upsert_mercadolivre_product(
         return dict(saved)
     finally:
         conn.close()
+
+
+def get_mercadolivre_photo_url(
+    get_db: Callable[[], Any], tenant_slug: str, external_id: str
+) -> Optional[str]:
+    """Photo URL of a registered Mercado Livre product, or None when unknown."""
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT p.image_url FROM products p JOIN tenants t ON t.id = p.tenant_id
+            WHERE t.slug = %s AND p.marketplace = 'mercadolivre' AND p.external_id = %s
+            """,
+            (tenant_slug, external_id),
+        )
+        row = cur.fetchone()
+        return row["image_url"] if row and row["image_url"] else None
+    finally:
+        conn.close()
