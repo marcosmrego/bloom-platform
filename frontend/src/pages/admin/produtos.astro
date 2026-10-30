@@ -18,18 +18,20 @@ export const prerender = false;
 
     <main>
       <h1>Cadastrar produto do Mercado Livre</h1>
-      <p class="lead">O produto é conferido na API do Mercado Livre antes de ser salvo. O link de afiliado só é guardado se corresponder ao ID informado.</p>
+      <p class="lead">O produto é identificado pelo link e conferido na API do Mercado Livre antes de ser salvo. Confira o nome mostrado abaixo antes de pedir o draft.</p>
 
       <form id="product-form">
-        <label>Nome do produto
-          <input name="name" required minlength="3" maxlength="200" placeholder="Chaleira elétrica 1,8L" />
-        </label>
         <label>Link de afiliado
           <input name="affiliate_link" required type="url" maxlength="1000" placeholder="https://meli.la/..." />
+          <small>Basta o link: o nome e o ID são lidos da página do Mercado Livre.</small>
         </label>
-        <label>ID do produto (MLB)
+        <label>Nome do produto (opcional)
+          <input name="name" minlength="3" maxlength="200" placeholder="Chaleira elétrica 1,8L" />
+          <small>Se informado, é conferido contra o produto do link.</small>
+        </label>
+        <label>ID do produto (MLB) (opcional)
           <input name="item_id" maxlength="20" placeholder="MLB24447228" />
-          <small>Obrigatório quando o link meli.la não abre o produto direto.</small>
+          <small>Só é preciso se o link não for reconhecido sozinho.</small>
         </label>
         <button type="submit">Cadastrar produto</button>
       </form>
@@ -140,9 +142,10 @@ export const prerender = false;
         event.preventDefault();
         const data = new FormData(form);
         const payload: Record<string, string> = {
-          name: String(data.get('name') || '').trim(),
           affiliate_link: String(data.get('affiliate_link') || '').trim(),
         };
+        const name = String(data.get('name') || '').trim();
+        if (name) payload.name = name;
         const itemId = String(data.get('item_id') || '').trim();
         if (itemId) payload.item_id = itemId;
 

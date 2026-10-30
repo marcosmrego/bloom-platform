@@ -56,6 +56,15 @@ class RegisterMercadoLivreProductEndpointTests(unittest.TestCase):
         self.assertNotIn("affiliate_link", body)
         self.assertEqual(register.await_args.args[:2], ("organizador de cabos", "https://meli.la/2AbCdEf"))
 
+    def test_registers_from_the_link_alone(self):
+        with patch.object(main, "get_mercadolivre_runtime", return_value=main.MercadoLivreRuntime(None, None)), patch.object(
+            main, "register_mercadolivre_product", AsyncMock(return_value=PRODUCT)
+        ) as register, patch.object(main, "run_db_task", AsyncMock(return_value=SAVED)):
+            response = self.client.post(URL, json={"affiliate_link": BODY["affiliate_link"]}, headers=AUTH)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["title"], PRODUCT.title)
+        self.assertEqual(register.await_args.args[:2], (None, "https://meli.la/2AbCdEf"))
+
     def test_rejects_short_names(self):
         response = self.client.post(URL, json=dict(BODY, name="ab"), headers=AUTH)
         self.assertEqual(response.status_code, 422)

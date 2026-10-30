@@ -6,6 +6,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from html import unescape
 from typing import Awaitable, Callable, Optional, Protocol, Tuple
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -20,6 +21,12 @@ MAX_REDIRECTS = 5
 CATALOG_PERMALINK = "https://www.mercadolivre.com.br/p/{}"
 MIN_NAME_OVERLAP = 0.5
 _ITEM_ID = re.compile(r"MLB-?(\d{6,})", re.IGNORECASE)
+MAX_SOCIAL_PAGE_BYTES = 2 * 1024 * 1024
+SOCIAL_PAGE_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
+_SOCIAL_PRODUCT_ID = re.compile(r'"product_id"\s*:\s*"(MLB\d{6,})"')
+_META_TAG = re.compile(r"<meta\s[^>]*>", re.IGNORECASE)
+_META_ATTR = re.compile(r"""([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+_PRICE_SUFFIX = re.compile(r"\s+-\s+R\$.*$")
 _STOPWORDS = frozenset({"para", "com", "sem", "kit", "uma", "por", "dos", "das"})
 
 
@@ -222,25 +229,73 @@ def _item_id_from_url(url: str) -> Optional[str]:
     return f"MLB{match.group(1)}" if match else None
 
 
-async def resolve_item_id(client: httpx.AsyncClient, link: str) -> Optional[str]:
+@dataclass(frozen=True)
+class ResolvedLink:
+    item_id: str
+    page_title: Optional[str] = None
+
+
+def _parse_social_page(html: str) -> Optional[ResolvedLink]:
+    """An affiliate profile page lists the shared product first, then recommendations."""
+    match = _SOCIAL_PRODUCT_ID.search(html)
+    if not match:
+        return None
+    page_title = _PRICE_SUFFIX.sub("", unescape(_og_title(html))).strip()
+    return ResolvedLink(match.group(1), page_title or None)
+
+
+def _og_title(html: str) -> str:
+    for tag in _META_TAG.findall(html):
+        attrs = {key.lower(): double or single for key, double, single in _META_ATTR.findall(tag)}
+        if attrs.get("property") == "og:title":
+            return attrs.get("content", "")
+    return ""
+
+
+async def _read_capped(response: httpx.Response) -> Optional[str]:
+    """Read a response body, giving up when it exceeds the page size limit."""
+    chunks, size = [], 0
+    async for chunk in response.aiter_bytes():
+        size += len(chunk)
+        if size > MAX_SOCIAL_PAGE_BYTES:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks).decode(response.encoding or "utf-8", errors="replace")
+
+
+async def resolve_link(client: httpx.AsyncClient, link: str) -> Optional[ResolvedLink]:
     """Follow an affiliate short link through Mercado Livre hosts only."""
     url = link
     for _ in range(MAX_REDIRECTS + 1):
         parsed = urlparse(url)
-        if parsed.scheme != "https" or parsed.username is not None or not is_mercadolivre_host(parsed.hostname):
+        if (
+            parsed.scheme != "https"
+            or parsed.username is not None
+            or parsed.port not in (None, 443)
+            or not is_mercadolivre_host(parsed.hostname)
+        ):
             return None
         item_id = _item_id_from_url(url)
         if item_id:
-            return item_id
+            return ResolvedLink(item_id)
         try:
-            response = await client.get(url, follow_redirects=False)
+            async with client.stream("GET", url, headers=SOCIAL_PAGE_HEADERS, follow_redirects=False) as response:
+                location = response.headers.get("location")
+                if response.status_code in (301, 302, 303, 307, 308) and location:
+                    url = urljoin(url, location)
+                    continue
+                if response.status_code == 200 and parsed.path.startswith("/social/"):
+                    body = await _read_capped(response)
+                    return _parse_social_page(body) if body is not None else None
+                return None
         except httpx.HTTPError:
             return None
-        location = response.headers.get("location")
-        if response.status_code not in (301, 302, 303, 307, 308) or not location:
-            return None
-        url = urljoin(url, location)
     return None
+
+
+async def resolve_item_id(client: httpx.AsyncClient, link: str) -> Optional[str]:
+    resolved = await resolve_link(client, link)
+    return resolved.item_id if resolved else None
 
 
 def _tokens(text: str) -> frozenset:
